@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: psebc
+          POSTGRES_PASSWORD: psebc
+          POSTGRES_DB: psebc_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U psebc" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://psebc:psebc@localhost:5432/psebc_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Unit tests (matching rules, status machine)
+        run: npm test -w @psebc/shared
+      - name: Journey tests against Postgres (every PRD acceptance criterion)
+        run: npm test -w @psebc/api
+      - name: Build
+        run: npm run build

@@ -1,0 +1,34 @@
+# Render Blueprint for the API (free tier, Frankfurt = EU hosting, PRD §9 data location).
+# The web app goes on Vercel (see docs/deployment.md). Database: Neon (London / eu-west-2).
+services:
+  - type: web
+    name: psebc-api
+    runtime: node
+    region: frankfurt
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build -w @psebc/api
+    startCommand: npm start -w @psebc/api
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: '22'
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATA_ENCRYPTION_KEY
+        sync: false
+      - key: WEB_ORIGIN
+        sync: false
+      - key: RUN_SCHEDULER
+        value: 'true'
+      - key: JOBS_SECRET
+        generateValue: true
+      - key: NOTIFY_EMAIL_DRIVER
+        value: console
+      - key: NOTIFY_SMS_DRIVER
+        value: console
+      - key: REPORTS_SHOW_MEMBER_NAMES
+        value: 'false'

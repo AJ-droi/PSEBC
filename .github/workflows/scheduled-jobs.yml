@@ -1,0 +1,20 @@
+# Runs the background checks (unmatched alerts, 72-hour log timeout, DBS/insurance
+# expiry, reminders, data retention) every 10 minutes by calling the API.
+# Needed when the API host sleeps when idle (e.g. Render free tier).
+# Set repository secrets API_BASE_URL (e.g. https://psebc-api.onrender.com) and JOBS_SECRET.
+name: Scheduled jobs
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger jobs
+        run: |
+          curl --fail --silent --show-error --max-time 120 \
+            -X POST "${{ secrets.API_BASE_URL }}/api/jobs/run" \
+            -H "x-jobs-secret: ${{ secrets.JOBS_SECRET }}"

@@ -6,8 +6,7 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start -p ${PORT:-3000}",
-    "typecheck": "tsc --noEmit -p .",
-    "lint": "next lint"
+    "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
     "@psebc/shared": "*",
