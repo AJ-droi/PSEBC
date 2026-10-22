@@ -24,6 +24,7 @@ const { seed } = await import('../src/db/seed');
 const jobs = await import('../src/jobs/tasks');
 
 let app: Express;
+type Agent = ReturnType<typeof request.agent>;
 const PASSWORD = 'ChangeMe-2026!';
 const inDays = (d: number, h = 9, m = 45) => {
   const t = new Date();
@@ -90,13 +91,13 @@ afterAll(async () => {
 });
 
 describe('PSEBC journey', () => {
-  let admin: request.SuperAgentTest;
-  let safeguarding: request.SuperAgentTest;
-  let coordinator: request.SuperAgentTest;
-  let margaret: request.SuperAgentTest;
-  let david: request.SuperAgentTest;
-  let peter: request.SuperAgentTest;
-  let helen: request.SuperAgentTest;
+  let admin: Agent;
+  let safeguarding: Agent;
+  let coordinator: Agent;
+  let margaret: Agent;
+  let david: Agent;
+  let peter: Agent;
+  let helen: Agent;
   let joanId: string;
   let newDriverId: string;
   let rideId: string;

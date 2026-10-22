@@ -5,7 +5,7 @@ import { createUserSchema } from '@psebc/shared';
 import { query, queryOne, withTx } from '../../db/pool';
 import { ah, parse, uuidParam } from '../../lib/http';
 import { badRequest, notFound } from '../../lib/errors';
-import { requireRole } from '../../middleware/auth';
+import { requireAuth, requireRole } from '../../middleware/auth';
 import { actorFrom, audit } from '../../services/audit';
 
 export const adminRouter = Router();
@@ -106,5 +106,15 @@ adminRouter.get(
   ah(async (_req, res) => {
     const rows = await query<{ key: string; value: unknown }>('SELECT key, value FROM settings');
     res.json({ settings: Object.fromEntries(rows.map((r) => [r.key, r.value])) });
+  }),
+);
+
+/** Settings every signed-in person may see (e.g. the church office phone number shown on member screens). */
+adminRouter.get(
+  '/public-settings',
+  requireAuth,
+  ah(async (_req, res) => {
+    const rows = await query<{ key: string; value: unknown }>(`SELECT key, value FROM settings WHERE key IN ('church_office_phone')`);
+    res.json(Object.fromEntries(rows.map((r) => [r.key, r.value])));
   }),
 );

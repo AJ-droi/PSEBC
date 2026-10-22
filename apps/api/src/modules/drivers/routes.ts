@@ -220,29 +220,35 @@ driversRouter.patch(
       helpCaps: 'help_caps',
     };
     const reapprovalFields = ['dbsNumber', 'dbsIssueDate', 'dbsRenewalDate', 'insuranceExpiry', 'vehicleMakeModel', 'vehicleReg', 'passengerSeats', 'vehicleCaps', 'helpCaps'];
-    const values: unknown[] = [id];
-    const sets: string[] = [];
-    for (const [k, v] of Object.entries(input)) {
-      if (!map[k] || v === undefined) continue;
-      values.push(v);
-      sets.push(`${map[k]} = $${values.length}`);
-    }
-    if (input.dbsIssueDate && !input.dbsRenewalDate) {
-      values.push(renewalDate({ dbsIssueDate: input.dbsIssueDate }));
-      sets.push(`dbs_renewal_date = $${values.length}`);
-    }
-    const needsReapproval = Object.keys(input).some((k) => reapprovalFields.includes(k));
     const submit = input.submit === true;
-    if (sets.length === 0 && !submit) throw badRequest('Nothing to change');
     await withTx(async (db) => {
-      const before = await queryOne<{ status: string; full_name: string }>('SELECT status, full_name FROM drivers WHERE id = $1 FOR UPDATE', [id], db);
+      const before = await queryOne<DriverRow>('SELECT * FROM drivers WHERE id = $1 FOR UPDATE', [id], db);
       if (!before || before.status === 'closed') throw notFound('Driver');
+      const same = (a: unknown, b: unknown) => JSON.stringify(Array.isArray(a) ? [...a].sort() : a) === JSON.stringify(Array.isArray(b) ? [...b].sort() : b);
+      const values: unknown[] = [id];
+      const sets: string[] = [];
+      const changed: string[] = [];
+      for (const [k, v] of Object.entries(input)) {
+        const col = map[k];
+        if (!col || v === undefined) continue;
+        if (same((before as unknown as Record<string, unknown>)[col], v)) continue;
+        values.push(v);
+        sets.push(`${col} = $${values.length}`);
+        changed.push(k);
+      }
+      if (changed.includes('dbsIssueDate') && !input.dbsRenewalDate) {
+        values.push(renewalDate({ dbsIssueDate: input.dbsIssueDate! }));
+        sets.push(`dbs_renewal_date = $${values.length}`);
+        changed.push('dbsRenewalDate');
+      }
+      if (sets.length === 0 && !submit) return;
+      const needsReapproval = changed.some((k) => reapprovalFields.includes(k));
       let newStatus = before.status;
       if ((before.status === 'approved' || before.status === 'expired') && needsReapproval) newStatus = 'pending';
       if (before.status === 'draft' && submit) newStatus = 'pending';
       if (sets.length) await db.query(`UPDATE drivers SET ${sets.join(', ')}, updated_at = now() WHERE id = $1`, values);
       if (newStatus !== before.status) await db.query(`UPDATE drivers SET status = $2 WHERE id = $1`, [id, newStatus]);
-      await audit(actorFrom(req), { action: 'driver.update', entityType: 'driver', entityId: id, details: { fields: Object.keys(input), status: newStatus } }, db);
+      await audit(actorFrom(req), { action: 'driver.update', entityType: 'driver', entityId: id, details: { fields: changed, status: newStatus } }, db);
       if (newStatus === 'pending' && before.status !== 'pending') {
         await notifyRole(db, ['safeguarding'], { kind: 'driver_pending', title: 'Driver waiting for approval', body: `${before.full_name}’s details changed and need your approval.`, link: `/safeguarding/approvals/${id}` }, { email: true });
       }
