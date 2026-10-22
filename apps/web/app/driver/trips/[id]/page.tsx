@@ -46,6 +46,10 @@ function Inner() {
       </>
     );
   }
+  if (data.view === 'invite') {
+    router.replace(`/driver/invites/${id}`);
+    return <Loading />;
+  }
   if (data.view !== 'driver_trip') return <ErrorBox error="This trip is not available." />;
   const t = data as DriverTripView;
   const r = t.ride;

@@ -35,8 +35,8 @@ function Inner() {
 
   async function accept() {
     const ok = await run(() => post(`/rides/${id}/accept`));
-    if (ok) router.replace(`/driver/trips/${id}?accepted=1`);
-    else mutate();
+    await mutate();
+    if (ok) router.replace(`/driver/trips/${id}`);
   }
 
   return (
