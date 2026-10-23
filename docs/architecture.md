@@ -38,7 +38,10 @@ flowchart LR
 apps/api/src
   app.ts                 express app: helmet, CORS, JSON limits, no-store caching, routers, error handler
   config/env.ts          Zod-validated environment
-  db/                    pool, transaction helper, migration runner, SQL migrations, seed
+  db/schema.ts           Drizzle ORM schema — tables, enums, indexes, checks (source of truth)
+  db/client.ts           Drizzle client on a pg pool (Neon TLS), withTx(), Executor type
+  db/sql.ts              fully-qualified column helper + shared correlated subqueries
+  db/migrate.ts, seed.ts drizzle-kit migrations runner (../drizzle/*.sql) and demo data
   middleware/auth.ts     session cookie, per-request user load, requireRole / MFA gate
   services/audit.ts      append-only audit writer
   services/notify.ts     notification outbox + delivery adapters (console | webhook)
@@ -57,7 +60,7 @@ apps/api/src
   jobs/                  unmatched alert, 72h timeout, expiry, reminders, retention, outbox flush
 ```
 
-Each module owns its routes and SQL; cross-module calls go through exported service functions
+Each module owns its routes and queries (Drizzle query builder); cross-module calls go through exported service functions
 (e.g. `closeDriverAccount` re-runs `matchAndInvite`). Business rules that both apps need live in
 `packages/shared` so the UI and API can never disagree on labels, statuses or validation.
 
@@ -82,7 +85,7 @@ stateDiagram-v2
   driver_found --> cancelled
 ```
 
-Transitions are enforced by `assertTransition()` (shared) and by `WHERE status = …` guards in SQL.
+Transitions are enforced by `assertTransition()` (shared) and by `status` guards in the update queries.
 
 ## 5. Matching rules (story 3.1)
 
@@ -148,14 +151,14 @@ erDiagram
 * **Swappable adapters**: notification sender (console → webhook → Twilio/Gov.Notify), document storage
   (Postgres `bytea` today → object storage later) behind one function each.
 * **Health check** `GET /api/health` (DB round-trip) for uptime monitors.
-* **Forward-only SQL migrations** run automatically on API start (`db/migrations/*.sql`).
+* **Migrations** are generated from the schema by drizzle-kit (`apps/api/drizzle/`) and applied automatically on API start. Things drizzle-kit can't express (the audit-log trigger, default settings) live in a custom migration.
 
 ## 9. Decisions and trade-offs
 
 | Decision | Why | Revisit when |
 | --- | --- | --- |
 | Next.js + separate Express API (not Next API routes) | Matches the brief; clean boundary; API can be reused by other clients | — |
-| Raw SQL with `pg` instead of an ORM | Transparent queries, row locks and partial indexes are first-class; tiny dependency surface | team grows and wants generated types (Kysely/Drizzle) |
+| Drizzle ORM (on the `pg` driver) | Typed queries and a single schema file, while staying close to SQL: row locks (`.for('update')`), partial unique indexes and `jsonb` work natively; analytics use typed `sql` fragments | — |
 | Documents in Postgres | Zero budget, one backup to manage, small files (≤5 MB) | volume grows → S3/R2 |
 | JWT cookie + DB lookup per request | Stateless scaling with instant revocation | very high traffic → short-lived cache |
 | SMS/email via webhook adapter | Church's provider is undecided (M365 dependency, PRD §11) | provider chosen |

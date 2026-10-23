@@ -9,7 +9,7 @@ driver to accept gets the lift; both sides log the trip; and the safeguarding le
 | --- | --- |
 | Web app (PWA) | Next.js 15 (App Router), React 19, TypeScript, SWR, hand-written service worker |
 | API | Node 22, Express 4, TypeScript, Zod validation, pino logging |
-| Database | PostgreSQL on **Neon** (plain SQL migrations, `pg` driver) |
+| Database | PostgreSQL on **Neon**, accessed through **Drizzle ORM** (typed schema, drizzle-kit migrations) |
 | Shared | `@psebc/shared` — domain vocabulary, matching rules, ride status machine, request schemas |
 
 ```
@@ -54,11 +54,23 @@ Open http://localhost:3000 and sign in with any demo account (password `ChangeMe
 
 Admin and safeguarding use multi-factor sign-in (PRD §10): scan the QR code with any authenticator app.
 
+## Changing the database
+
+The schema lives in `apps/api/src/db/schema.ts`. After editing it:
+
+```bash
+npm run db:generate -w @psebc/api   # writes a new SQL migration into apps/api/drizzle/
+npm run db:migrate                  # applies it (the API also applies pending migrations on start)
+npm run db:studio -w @psebc/api     # optional: browse the data in Drizzle Studio
+```
+
+Commit the generated files in `apps/api/drizzle/` with the schema change.
+
 ## Tests
 
 ```bash
 npm test -w @psebc/shared   # 17 unit tests: matching rules + ride status machine
-TEST_DATABASE_URL=postgresql://... npm test -w @psebc/api   # 26 journey tests on a real database
+TEST_DATABASE_URL=postgresql://... npm test -w @psebc/api   # 27 journey tests on a real database
 npm run typecheck && npm run build
 ```
 
