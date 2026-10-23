@@ -4,6 +4,7 @@ import { CONCERN_KINDS, concernReviewSchema, concernSchema, labelList } from '@p
 import { db, withTx } from '../../db/client';
 import { concerns, drivers, members, rides } from '../../db/schema';
 import { ah, parse, uuidParam } from '../../lib/http';
+import { pageFrom } from '../../lib/pagination';
 import { conflict, forbidden, notFound } from '../../lib/errors';
 import { formatWhen } from '../../lib/time';
 import { currentUser, requireAuth, requireRole } from '../../middleware/auth';
@@ -59,11 +60,14 @@ concernsRouter.post(
   }),
 );
 
-/** Incidents list for safeguarding only. */
+/** Incidents list for safeguarding only. `?status=open|reviewed`, one page at a time (open first, newest first). */
 concernsRouter.get(
   '/',
   requireRole('safeguarding'),
-  ah(async (_req, res) => {
+  ah(async (req, res) => {
+    const page = pageFrom(req);
+    const status = req.query.status === 'open' || req.query.status === 'reviewed' ? req.query.status : null;
+    const where = status ? eq(concerns.status, status) : undefined;
     const rows = await db
       .select({
         id: concerns.id,
@@ -83,9 +87,11 @@ concernsRouter.get(
       .innerJoin(rides, eq(rides.id, concerns.rideId))
       .innerJoin(members, eq(members.id, rides.memberId))
       .leftJoin(drivers, eq(drivers.id, rides.driverId))
-      .orderBy(asc(sql`${concerns.status} = 'reviewed'`), desc(concerns.createdAt))
-      .limit(200);
-    res.json({ concerns: rows });
+      .where(where)
+      .orderBy(asc(sql`${concerns.status} = 'reviewed'`), desc(concerns.createdAt), desc(concerns.id))
+      .limit(page.limit)
+      .offset(page.offset);
+    res.json({ concerns: rows, pagination: page.meta(await db.$count(concerns, where)) });
   }),
 );
 

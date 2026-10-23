@@ -216,3 +216,7 @@ table.data a { font-weight: 500; }
   .m-top, .steps { padding-left: 16px; padding-right: 16px; }
   .m-foot { padding-left: 16px; padding-right: 16px; }
 }
+
+/* Pagination */
+.pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding-top: 4px; }
+.pager .btn:disabled { visibility: hidden; }

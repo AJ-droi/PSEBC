@@ -4,6 +4,7 @@ import { memberCreateSchema, memberDetailsUpdateSchema, memberNeedsUpdateSchema,
 import { withTx } from '../../db/client';
 import { members } from '../../db/schema';
 import { ah, parse, uuidParam } from '../../lib/http';
+import { pageFrom } from '../../lib/pagination';
 import { forbidden, notFound, badRequest } from '../../lib/errors';
 import { encryptJson } from '../../lib/crypto';
 import { requireAuth, requireRole, currentUser } from '../../middleware/auth';
@@ -19,7 +20,9 @@ membersRouter.get(
   '/',
   requireRole('coordinator', 'admin', 'safeguarding'),
   ah(async (req, res) => {
-    res.json({ members: await searchMembers(String(req.query.q ?? '')) });
+    const page = pageFrom(req);
+    const { rows, total } = await searchMembers(String(req.query.q ?? ''), page);
+    res.json({ members: rows, pagination: page.meta(total) });
   }),
 );
 

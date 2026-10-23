@@ -257,3 +257,30 @@ export const closeAccountSchema = z.object({
 });
 
 export const reportQuerySchema = z.object({ month: z.string().regex(/^\d{4}-\d{2}$/) });
+
+// ---------- Pagination (every list endpoint) ----------
+
+export const PAGE_SIZE_DEFAULT = 20;
+export const PAGE_SIZE_MAX = 100;
+
+/** `?page=2&pageSize=20` — page numbers start at 1. */
+export const paginationQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(PAGE_SIZE_MAX).default(PAGE_SIZE_DEFAULT),
+});
+export type PaginationQuery = z.infer<typeof paginationQuerySchema>;
+
+/** Returned next to every paginated list as `pagination`. */
+export interface PageMeta {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  hasNext: boolean;
+  hasPrevious: boolean;
+}
+
+export function pageMeta(q: PaginationQuery, total: number): PageMeta {
+  const totalPages = Math.max(1, Math.ceil(total / q.pageSize));
+  return { page: q.page, pageSize: q.pageSize, total, totalPages, hasNext: q.page < totalPages, hasPrevious: q.page > 1 };
+}

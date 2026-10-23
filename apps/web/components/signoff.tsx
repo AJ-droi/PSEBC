@@ -7,7 +7,8 @@ import { fetcher, post } from '@/lib/api';
 import { useSubmit } from '@/lib/form';
 import { dayLong, time, when } from '@/lib/format';
 import { ErrorBox, Loading, RideChip, SelectField, Tags, TextArea } from './ui';
-import type { RideStatus } from '@psebc/shared';
+import type { PageMeta, RideStatus } from '@psebc/shared';
+import { Pager, usePage } from './pager';
 
 interface QueueItem {
   id: string;
@@ -54,30 +55,51 @@ interface TripRecord {
 
 /** F11 Safeguarding sign-off (stories 4.3, 6.1, 6.2) — desktop, safeguarding lead only. */
 export function SignoffWorkspace({ selectedId }: { selectedId?: string }) {
-  const { data: queue, mutate: refreshQueue } = useSWR<{ trips: QueueItem[] }>('/safeguarding/queue', fetcher, { refreshInterval: 60_000 });
-  const ready = queue?.trips.filter((t) => t.ready) ?? [];
-  const waiting = queue?.trips.filter((t) => !t.ready) ?? [];
+  const readyPage = usePage('/safeguarding/queue', { stage: 'ready' }, 15);
+  const waitingPage = usePage('/safeguarding/queue', { stage: 'waiting' }, 15);
+  const opts = { refreshInterval: 60_000, keepPreviousData: true };
+  const { data: ready, mutate: refreshReady } = useSWR<Queue>(readyPage.key, fetcher, opts);
+  const { data: waiting, mutate: refreshWaiting } = useSWR<Queue>(waitingPage.key, fetcher, opts);
   return (
     <div className="d-split">
       <aside className="section" style={{ padding: 16 }}>
-        <h2>Waiting for sign-off ({ready.length})</h2>
-        {!queue ? <Loading /> : null}
-        {queue && ready.length === 0 ? <p className="muted small">Nothing waiting. Well done.</p> : null}
-        {ready.map((t) => (
+        <h2>Waiting for sign-off ({ready?.pagination.total ?? '…'})</h2>
+        {!ready ? <Loading /> : null}
+        {ready && ready.trips.length === 0 ? <p className="muted small">Nothing waiting. Well done.</p> : null}
+        {ready?.trips.map((t) => (
           <QueueLink key={t.id} t={t} selected={t.id === selectedId} />
         ))}
-        {waiting.length ? (
+        <Pager pagination={ready?.pagination} onPage={readyPage.setPage} noun="trips" />
+        {waiting?.trips.length ? (
           <>
-            <h2 style={{ marginTop: 12 }}>Waiting for logs ({waiting.length})</h2>
-            {waiting.map((t) => (
+            <h2 style={{ marginTop: 12 }}>Waiting for logs ({waiting.pagination.total})</h2>
+            {waiting.trips.map((t) => (
               <QueueLink key={t.id} t={t} selected={t.id === selectedId} />
             ))}
+            <Pager pagination={waiting.pagination} onPage={waitingPage.setPage} noun="trips" />
           </>
         ) : null}
       </aside>
-      {selectedId ? <TripDetail id={selectedId} onChange={() => refreshQueue()} /> : <section className="section"><p className="muted">Choose a trip to review.</p></section>}
+      {selectedId ? (
+        <TripDetail
+          id={selectedId}
+          onChange={() => {
+            void refreshReady();
+            void refreshWaiting();
+          }}
+        />
+      ) : (
+        <section className="section">
+          <p className="muted">Choose a trip to review.</p>
+        </section>
+      )}
     </div>
   );
+}
+
+interface Queue {
+  trips: QueueItem[];
+  pagination: PageMeta;
 }
 
 function QueueLink({ t, selected }: { t: QueueItem; selected: boolean }) {

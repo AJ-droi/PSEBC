@@ -6,6 +6,7 @@ import { createUserSchema } from '@psebc/shared';
 import { db, withTx } from '../../db/client';
 import { auditLog, settings, users } from '../../db/schema';
 import { ah, parse, uuidParam } from '../../lib/http';
+import { pageFrom } from '../../lib/pagination';
 import { badRequest, notFound } from '../../lib/errors';
 import { requireAuth, requireRole } from '../../middleware/auth';
 import { actorFrom, audit } from '../../services/audit';
@@ -16,7 +17,8 @@ export const adminRouter = Router();
 adminRouter.get(
   '/users',
   requireRole('admin'),
-  ah(async (_req, res) => {
+  ah(async (req, res) => {
+    const page = pageFrom(req);
     const rows = await db
       .select({
         id: users.id,
@@ -30,8 +32,10 @@ adminRouter.get(
         lastLoginAt: users.lastLoginAt,
       })
       .from(users)
-      .orderBy(asc(users.status), asc(users.role), asc(users.fullName));
-    res.json({ users: rows });
+      .orderBy(asc(users.status), asc(users.role), asc(users.fullName), asc(users.id))
+      .limit(page.limit)
+      .offset(page.offset);
+    res.json({ users: rows, pagination: page.meta(await db.$count(users)) });
   }),
 );
 
@@ -116,8 +120,10 @@ adminRouter.get(
   '/audit',
   requireRole('admin', 'safeguarding'),
   ah(async (req, res) => {
+    const page = pageFrom(req, { pageSize: 50 });
     const entityType = String(req.query.entityType ?? '');
     const entityId = String(req.query.entityId ?? '');
+    const where = and(entityType ? eq(auditLog.entityType, entityType) : undefined, entityId ? eq(auditLog.entityId, entityId) : undefined);
     const entries = await db
       .select({
         id: auditLog.id,
@@ -130,10 +136,11 @@ adminRouter.get(
         details: auditLog.details,
       })
       .from(auditLog)
-      .where(and(entityType ? eq(auditLog.entityType, entityType) : undefined, entityId ? eq(auditLog.entityId, entityId) : undefined))
-      .orderBy(desc(auditLog.at))
-      .limit(200);
-    res.json({ entries });
+      .where(where)
+      .orderBy(desc(auditLog.at), desc(auditLog.id))
+      .limit(page.limit)
+      .offset(page.offset);
+    res.json({ entries, pagination: page.meta(await db.$count(auditLog, where)) });
   }),
 );
 

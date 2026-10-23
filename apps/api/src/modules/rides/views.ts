@@ -1,4 +1,4 @@
-import { and, asc, count, eq, gt, inArray, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, inArray, sql } from 'drizzle-orm';
 import {
   DRIVER_DETAIL_ACCESS,
   HEALTH_FLAGS,
@@ -262,5 +262,25 @@ export async function driverHome(driverId: string) {
       town,
       needsLog: ['completed', 'logged'].includes(r.status) && !driverLogged,
     })),
+  };
+}
+
+/** Every lift for one member, newest first, one page at a time (office member page). */
+export async function memberRideHistory(memberId: string, page: { limit: number; offset: number }) {
+  const rows = await db
+    .select({ ride: rides, driverName: drivers.fullName })
+    .from(rides)
+    .leftJoin(drivers, eq(drivers.id, rides.driverId))
+    .where(eq(rides.memberId, memberId))
+    .orderBy(desc(rides.pickupAt), desc(rides.id))
+    .limit(page.limit)
+    .offset(page.offset);
+  const total = await db.$count(rides, eq(rides.memberId, memberId));
+  return {
+    rows: rows.map(({ ride: r, driverName }) => ({
+      ...rideCore(r),
+      driverFirstName: driverName && DRIVER_VISIBLE_TO_MEMBER.includes(r.status) ? driverName.split(' ')[0] : null,
+    })),
+    total,
   };
 }

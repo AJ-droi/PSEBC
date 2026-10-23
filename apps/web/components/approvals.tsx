@@ -2,7 +2,8 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import useSWR from 'swr';
-import { HELP_CAPS, VEHICLE_CAPS, formatUkPhone, labelList, type DriverStatus } from '@psebc/shared';
+import { HELP_CAPS, VEHICLE_CAPS, formatUkPhone, labelList, type DriverStatus, type PageMeta } from '@psebc/shared';
+import { Pager, usePage } from './pager';
 import { fetcher, post } from '@/lib/api';
 import { useSubmit } from '@/lib/form';
 import { date } from '@/lib/format';
@@ -22,10 +23,18 @@ interface Row {
 
 /** F03 Driver approval (stories 1.3 PSEBC-9, 1.4 PSEBC-10). Safeguarding lead only. */
 export function ApprovalsWorkspace({ selectedId }: { selectedId?: string }) {
-  const { data, mutate } = useSWR<{ drivers: Row[] }>('/drivers', fetcher);
-  const pending = data?.drivers.filter((d) => d.status === 'pending') ?? [];
-  const expiring = data?.drivers.filter((d) => d.expiringSoon || d.status === 'expired') ?? [];
-  const others = data?.drivers.filter((d) => !pending.includes(d) && !expiring.includes(d) && d.status !== 'draft') ?? [];
+  type List = { drivers: Row[]; pagination: PageMeta };
+  const pendingPage = usePage('/drivers', { status: 'pending' }, 25);
+  const expiringPage = usePage('/drivers', { view: 'expiring' }, 25);
+  const allPage = usePage('/drivers', {}, 15);
+  const { data: pendingData, mutate: m1 } = useSWR<List>(pendingPage.key, fetcher, { keepPreviousData: true });
+  const { data: expiringData, mutate: m2 } = useSWR<List>(expiringPage.key, fetcher, { keepPreviousData: true });
+  const { data: allData, mutate: m3 } = useSWR<List>(allPage.key, fetcher, { keepPreviousData: true });
+  const data = allData;
+  const mutate = () => Promise.all([m1(), m2(), m3()]);
+  const pending = pendingData?.drivers ?? [];
+  const expiring = expiringData?.drivers ?? [];
+  const others = allData?.drivers.filter((d) => d.status !== 'draft') ?? [];
   const link = (d: Row, sub: string) => (
     <Link key={d.id} className="list-link" href={`/safeguarding/approvals/${d.id}`} aria-current={d.id === selectedId ? 'true' : undefined}>
       <strong>{d.fullName}</strong>
@@ -35,14 +44,17 @@ export function ApprovalsWorkspace({ selectedId }: { selectedId?: string }) {
   return (
     <div className="d-split">
       <aside className="section" style={{ padding: 16 }}>
-        <h2>Waiting for a decision ({pending.length})</h2>
+        <h2>Waiting for a decision ({pendingData?.pagination.total ?? '…'})</h2>
         {!data ? <Loading /> : null}
         {pending.map((d) => link(d, d.reapproval ? 'Details changed · re-approval' : `New driver · added ${date(d.createdAt)}`))}
+        <Pager pagination={pendingData?.pagination} onPage={pendingPage.setPage} noun="drivers" />
         <h2 style={{ marginTop: 12 }}>Expiring in 30 days</h2>
         {expiring.length === 0 ? <p className="small muted">None</p> : null}
         {expiring.map((d) => link(d, d.status === 'expired' ? 'Expired' : `Expires ${date(d.expiresOn)}`))}
+        <Pager pagination={expiringData?.pagination} onPage={expiringPage.setPage} noun="drivers" />
         <h2 style={{ marginTop: 12 }}>All drivers</h2>
         {others.map((d) => link(d, d.status))}
+        <Pager pagination={allData?.pagination} onPage={allPage.setPage} noun="drivers" />
       </aside>
       {selectedId ? <Decision id={selectedId} onDone={() => mutate()} /> : <section className="section"><p className="muted">Choose a driver to review.</p></section>}
     </div>

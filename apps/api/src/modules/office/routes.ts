@@ -4,18 +4,22 @@ import { db } from '../../db/client';
 import { inviteCount, q, tripLogExists } from '../../db/sql';
 import { drivers, members, notifications, rides, users } from '../../db/schema';
 import { ah } from '../../lib/http';
+import { pageFrom } from '../../lib/pagination';
 import { requireRole } from '../../middleware/auth';
 import { statusFields } from '../rides/views';
 
 export const officeRouter = Router();
 
 const bookedBy = aliasedTable(users, 'booked_by');
+/** "Needs attention" lists are things to act on now, not browse; cap each so the page stays light. */
+const ATTENTION_CAP = 50;
 
 /** Church office "Lifts this week" (design O-Coordinator): needs attention + upcoming lifts. */
 officeRouter.get(
   '/overview',
   requireRole('coordinator', 'admin', 'safeguarding'),
   ah(async (req, res) => {
+    const page = pageFrom(req);
     const from = req.query.from ? new Date(String(req.query.from)) : startOfWeek(new Date());
     const to = new Date(from.getTime() + 7 * 86_400_000);
 
@@ -32,14 +36,16 @@ officeRouter.get(
       .from(rides)
       .innerJoin(members, eq(members.id, rides.memberId))
       .where(and(eq(rides.status, 'unmatched'), gt(rides.pickupAt, sql`now() - interval '2 hours'`)))
-      .orderBy(asc(rides.pickupAt));
+      .orderBy(asc(rides.pickupAt))
+      .limit(ATTENTION_CAP);
 
     const notAtPickup = await db
       .select({ id: rides.id, pickupAt: rides.pickupAt, fullName: members.fullName, phone: members.phone, emergencyPhone: members.emergencyPhone, driverName: drivers.fullName })
       .from(rides)
       .innerJoin(members, eq(members.id, rides.memberId))
       .leftJoin(drivers, eq(drivers.id, rides.driverId))
-      .where(and(gt(rides.notAtPickupAt, sql`now() - interval '12 hours'`), eq(rides.status, 'driver_found'), isNull(rides.pickedUpAt)));
+      .where(and(gt(rides.notAtPickupAt, sql`now() - interval '12 hours'`), eq(rides.status, 'driver_found'), isNull(rides.pickedUpAt)))
+      .limit(ATTENTION_CAP);
 
     // Members without a login whose trip still needs their side of the log.
     const phoneLogs = await db
@@ -53,13 +59,15 @@ officeRouter.get(
           sql`NOT EXISTS (SELECT 1 FROM ${users} WHERE ${q(users.memberId)} = ${q(members.id)} AND ${q(users.status)} = 'active')`,
         ),
       )
-      .orderBy(asc(rides.pickupAt));
+      .orderBy(asc(rides.pickupAt))
+      .limit(ATTENTION_CAP);
 
     const tasks = await db
       .selectDistinctOn([notifications.title, notifications.rideId], { id: notifications.id, title: notifications.title, body: notifications.body, link: notifications.link, createdAt: notifications.createdAt })
       .from(notifications)
       .where(and(eq(notifications.channel, 'phone_task'), isNull(notifications.readAt), eq(notifications.userId, req.user!.id)))
-      .orderBy(notifications.title, notifications.rideId, desc(notifications.createdAt));
+      .orderBy(notifications.title, notifications.rideId, desc(notifications.createdAt))
+      .limit(ATTENTION_CAP);
 
     const upcoming = await db
       .select({
@@ -78,7 +86,10 @@ officeRouter.get(
       .leftJoin(drivers, eq(drivers.id, rides.driverId))
       .leftJoin(bookedBy, eq(bookedBy.id, rides.bookedByUserId))
       .where(and(gte(rides.pickupAt, from), lt(rides.pickupAt, to)))
-      .orderBy(asc(rides.pickupAt));
+      .orderBy(asc(rides.pickupAt), asc(rides.id))
+      .limit(page.limit)
+      .offset(page.offset);
+    const upcomingTotal = await db.$count(rides, and(gte(rides.pickupAt, from), lt(rides.pickupAt, to)));
 
     res.json({
       week: { from, to },
@@ -112,6 +123,8 @@ officeRouter.get(
         })),
       ],
       tasks,
+      pagination: page.meta(upcomingTotal),
+      attentionCapped: [unmatched, notAtPickup, phoneLogs, tasks].some((l) => l.length >= ATTENTION_CAP),
       upcoming: upcoming.map((r) => ({
         id: r.id,
         memberName: r.memberName,

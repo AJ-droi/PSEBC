@@ -143,6 +143,19 @@ erDiagram
 
 ## 8. Scalability and operations
 
+* **Every list is paginated.** Request `?page=N&pageSize=M` (defaults 1 and 20, maximum 100; audit trail
+  defaults to 50). Responses keep their list key and add `pagination`:
+  `{ page, pageSize, total, totalPages, hasNext, hasPrevious }`. Ordering always ends with the row id, so
+  pages are stable and nothing is skipped or repeated. Filters (`q`, `status`, `view`, `stage`, `entityType`)
+  work together with paging. Helper: `apps/api/src/lib/pagination.ts`; web: `components/pager.tsx`.
+  Paginated endpoints: `/members`, `/drivers`, `/admin/users`, `/admin/audit`, `/concerns`, `/notifications`,
+  `/safeguarding/queue`, `/office/overview` (week's lifts), `/rides/history`. The office "needs attention"
+  lists are capped at 50 each (work to do now, not to browse).
+* **Fair-use request limit** on the whole API: 300 requests a minute per signed-in person, 60 per IP when
+  signed out (plus the stricter login limit). Over the limit returns 429 with a plain-English message and
+  `RateLimit` headers. In-memory per instance; move to a shared store (e.g. Redis) if the API runs on
+  several machines.
+
 * **Stateless API** → run more instances behind a load balancer; Neon's pooled endpoint absorbs connections.
 * **Indexes** on every hot query (rides by status/member/driver/pickup, open concerns, outbox).
 * **Transactions everywhere state changes**, with notifications written in the same transaction (outbox),

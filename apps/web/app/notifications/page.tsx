@@ -1,7 +1,9 @@
 'use client';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import useSWR from 'swr';
+import useSWR, { useSWRConfig } from 'swr';
+import type { PageMeta } from '@psebc/shared';
+import { Pager, usePage } from '@/components/pager';
 import { chime, enablePushAlerts, pushState, setSoundEnabled, soundEnabled, type PushState } from '@/lib/alerts';
 import { BackBar, Loading } from '@/components/ui';
 import { RoleGate } from '@/components/shells';
@@ -20,7 +22,11 @@ interface N {
 }
 
 export default function Notifications() {
-  const { data, mutate } = useSWR<{ notifications: N[] }>('/notifications', fetcher);
+  const { key, setPage } = usePage('/notifications');
+  const { data } = useSWR<{ notifications: N[]; pagination: PageMeta }>(key, fetcher, { keepPreviousData: true });
+  const { mutate: mutateAll } = useSWRConfig();
+  // Refresh this page and the bell badge together.
+  const mutate = () => mutateAll((k) => typeof k === 'string' && k.startsWith('/notifications'));
   return (
     <div className="mobile">
       <RoleGate roles={['member', 'driver', 'coordinator', 'admin', 'safeguarding']}>
@@ -63,6 +69,7 @@ export default function Notifications() {
                   </Link>
                 ))}
               </div>
+              <Pager pagination={data?.pagination} onPage={setPage} noun="messages" />
             </main>
           </>
         )}

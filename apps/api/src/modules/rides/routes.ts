@@ -10,12 +10,13 @@ import {
 } from '@psebc/shared';
 import { z } from 'zod';
 import { ah, parse, uuidParam } from '../../lib/http';
+import { pageFrom } from '../../lib/pagination';
 import { forbidden } from '../../lib/errors';
 import { currentUser, requireAuth, requireRole } from '../../middleware/auth';
 import { actorFrom } from '../../services/audit';
 import { flushSoon } from '../../services/notify';
 import * as svc from './service';
-import { memberRides, rideView } from './views';
+import { memberRideHistory, memberRides, rideView } from './views';
 
 export const ridesRouter = Router();
 
@@ -29,6 +30,21 @@ ridesRouter.get(
     if (!memberId) throw forbidden();
     svc.assertCanActForMember(user, memberId);
     res.json(await memberRides(memberId));
+  }),
+);
+
+/** All of a member's lifts, newest first, paginated (`?memberId=…&page=…`). Office, or the member themself. */
+ridesRouter.get(
+  '/history',
+  requireAuth,
+  ah(async (req, res) => {
+    const user = currentUser(req);
+    const memberId = user.role === 'member' ? user.memberId : String(req.query.memberId ?? '');
+    if (!memberId) throw forbidden();
+    svc.assertCanActForMember(user, memberId);
+    const page = pageFrom(req);
+    const { rows, total } = await memberRideHistory(memberId, page);
+    res.json({ rides: rows, pagination: page.meta(total) });
   }),
 );
 

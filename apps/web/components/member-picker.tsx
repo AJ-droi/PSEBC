@@ -17,7 +17,7 @@ export function MemberPicker({ label, action, onPick }: { label: string; action:
   const [q, setQ] = useState('');
   const [chosen, setChosen] = useState<M | null>(null);
   const id = useId();
-  const { data } = useSWR<{ members: M[] }>(q.length >= 2 && !chosen ? `/members?q=${encodeURIComponent(q)}` : null, fetcher);
+  const { data } = useSWR<{ members: M[] }>(q.length >= 2 && !chosen ? `/members?q=${encodeURIComponent(q)}&pageSize=6` : null, fetcher);
   const results = (data?.members ?? []).filter((m) => m.status === 'active').slice(0, 6);
   return (
     <form

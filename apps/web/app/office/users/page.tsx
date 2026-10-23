@@ -1,7 +1,8 @@
 'use client';
 import { useState } from 'react';
 import useSWR from 'swr';
-import type { Role } from '@psebc/shared';
+import type { PageMeta, Role } from '@psebc/shared';
+import { Pager, usePage } from '@/components/pager';
 import { DesktopShell } from '@/components/shells';
 import { ErrorBox, Loading, SelectField, TextField } from '@/components/ui';
 import { fetcher, post } from '@/lib/api';
@@ -24,7 +25,8 @@ export default function Users() {
 }
 
 function Inner() {
-  const { data, mutate } = useSWR<{ users: U[] }>('/admin/users', fetcher);
+  const { key, setPage } = usePage('/admin/users');
+  const { data, mutate } = useSWR<{ users: U[]; pagination: PageMeta }>(key, fetcher, { keepPreviousData: true });
   const [form, setForm] = useState({ email: '', fullName: '', role: 'coordinator', password: '' });
   const { busy, error, fields, run } = useSubmit();
   const [msg, setMsg] = useState<string | null>(null);
@@ -99,6 +101,7 @@ function Inner() {
               </table>
             </div>
           )}
+          <Pager pagination={data?.pagination} onPage={setPage} noun="logins" />
         </section>
         <aside className="section">
           <h2>Add a staff login</h2>

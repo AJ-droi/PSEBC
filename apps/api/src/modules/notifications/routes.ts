@@ -5,6 +5,7 @@ import { env, pushEnabled } from '../../config/env';
 import { db } from '../../db/client';
 import { notifications, pushSubscriptions } from '../../db/schema';
 import { ah, parse, uuidParam } from '../../lib/http';
+import { pageFrom } from '../../lib/pagination';
 import { currentUser, requireAuth } from '../../middleware/auth';
 
 export const notificationsRouter = Router();
@@ -13,6 +14,8 @@ notificationsRouter.get(
   '/',
   requireAuth,
   ah(async (req, res) => {
+    const page = pageFrom(req);
+    const mine = and(eq(notifications.userId, currentUser(req).id), inArray(notifications.channel, ['in_app', 'phone_task']));
     const rows = await db
       .select({
         id: notifications.id,
@@ -25,10 +28,12 @@ notificationsRouter.get(
         createdAt: notifications.createdAt,
       })
       .from(notifications)
-      .where(and(eq(notifications.userId, currentUser(req).id), inArray(notifications.channel, ['in_app', 'phone_task'])))
-      .orderBy(desc(notifications.createdAt))
-      .limit(50);
-    res.json({ notifications: rows, unread: rows.filter((r) => !r.readAt).length });
+      .where(mine)
+      .orderBy(desc(notifications.createdAt), desc(notifications.id))
+      .limit(page.limit)
+      .offset(page.offset);
+    const [total, unread] = await Promise.all([db.$count(notifications, mine), db.$count(notifications, and(mine, isNull(notifications.readAt)))]);
+    res.json({ notifications: rows, unread, pagination: page.meta(total) });
   }),
 );
 

@@ -528,6 +528,68 @@ describe('PSEBC journey', () => {
     expect((await coordinator.get(`/api/drivers/${newDriverId}`)).status).toBe(403);
   });
 
+  it('Pagination: every list returns one page plus totals, and page sizes are capped', async () => {
+    const first = await coordinator.get('/api/members').query({ pageSize: 2 });
+    expect(first.body.members).toHaveLength(2);
+    expect(first.body.pagination).toMatchObject({ page: 1, pageSize: 2, hasPrevious: false, hasNext: true });
+    const total = first.body.pagination.total as number;
+    expect(total).toBeGreaterThanOrEqual(5);
+    expect(first.body.pagination.totalPages).toBe(Math.ceil(total / 2));
+
+    // Walking every page returns every member exactly once (stable ordering).
+    const seen = new Set<string>();
+    for (let page = 1; page <= first.body.pagination.totalPages; page++) {
+      const res = await coordinator.get('/api/members').query({ pageSize: 2, page });
+      res.body.members.forEach((m: { id: string }) => seen.add(m.id));
+    }
+    expect(seen.size).toBe(total);
+
+    const past = await coordinator.get('/api/members').query({ pageSize: 2, page: 999 });
+    expect(past.body.members).toEqual([]);
+    expect(past.body.pagination.hasNext).toBe(false);
+
+    expect((await coordinator.get('/api/members').query({ pageSize: 500 })).status).toBe(422);
+    expect((await coordinator.get('/api/members').query({ page: 0 })).status).toBe(422);
+    expect((await coordinator.get('/api/members')).body.pagination.pageSize).toBe(20); // default
+
+    // Other lists use the same contract.
+    for (const [agent, url, key] of [
+      [admin, '/api/drivers', 'drivers'],
+      [admin, '/api/admin/users', 'users'],
+      [safeguarding, '/api/admin/audit', 'entries'],
+      [safeguarding, '/api/concerns', 'concerns'],
+      [safeguarding, '/api/safeguarding/queue', 'trips'],
+      [coordinator, '/api/office/overview', 'upcoming'],
+      [david, '/api/notifications', 'notifications'],
+    ] as const) {
+      const res = await agent.get(url).query({ pageSize: 1 });
+      expect(res.status, url).toBe(200);
+      expect(res.body[key].length, url).toBeLessThanOrEqual(1);
+      expect(res.body.pagination, url).toMatchObject({ page: 1, pageSize: 1 });
+    }
+
+    // The unread badge counts every unread message, not just the ones on this page.
+    const inbox = await david.get('/api/notifications').query({ pageSize: 1 });
+    const [unread] = await query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM notifications n JOIN users u ON u.id = n.user_id WHERE u.email = 'david@psebc.example' AND n.channel IN ('in_app','phone_task') AND n.read_at IS NULL`,
+    );
+    expect(inbox.body.unread).toBe(unread!.n);
+
+    // Filters still work with paging.
+    const pending = await admin.get('/api/drivers').query({ status: 'pending' });
+    expect(pending.body.drivers.every((d: { status: string }) => d.status === 'pending')).toBe(true);
+    const open = await safeguarding.get('/api/concerns').query({ status: 'open' });
+    expect(open.body.concerns.every((c: { status: string }) => c.status === 'open')).toBe(true);
+
+    // A member's lift history pages newest first.
+    const [m] = await query<{ id: string }>(`SELECT id FROM members WHERE preferred_name = 'Margaret'`);
+    const hist = await coordinator.get('/api/rides/history').query({ memberId: m!.id, pageSize: 3 });
+    expect(hist.body.rides.length).toBeLessThanOrEqual(3);
+    const times = hist.body.rides.map((r: { pickupAt: string }) => new Date(r.pickupAt).getTime());
+    expect([...times].sort((a, b) => b - a)).toEqual(times);
+    expect((await peter.get('/api/rides/history').query({ memberId: m!.id })).status).toBe(403);
+  });
+
   it('Audit trail is append-only', async () => {
     await expect(query('DELETE FROM audit_log')).rejects.toThrow(/append-only/);
     await expect(query(`UPDATE audit_log SET action = 'x'`)).rejects.toThrow(/append-only/);

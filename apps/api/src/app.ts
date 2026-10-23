@@ -3,6 +3,7 @@ import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import { pinoHttp } from 'pino-http';
 import { env } from './config/env';
 import { sql } from 'drizzle-orm';
@@ -51,6 +52,20 @@ export function createApp() {
   });
 
   app.use('/api', loadUser);
+  // Fair-use limit per signed-in person (or per IP when signed out): stops a stuck tab or
+  // a script from flooding the API. Generous for normal use — screens poll every 20–60 s.
+  app.use(
+    '/api',
+    rateLimit({
+      windowMs: 60_000,
+      limit: (req) => (req.user ? 300 : 60),
+      keyGenerator: (req) => req.user?.id ?? `ip:${req.ip}`,
+      standardHeaders: 'draft-7',
+      legacyHeaders: false,
+      skip: () => env().NODE_ENV === 'test',
+      message: { error: { code: 'rate_limited', message: 'Too many requests. Please wait a moment and try again.' } },
+    }),
+  );
   app.use('/api/auth', authRouter);
   app.use('/api/members', membersRouter);
   app.use('/api/drivers', driversRouter);

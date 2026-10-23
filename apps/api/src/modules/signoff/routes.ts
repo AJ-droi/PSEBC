@@ -5,6 +5,7 @@ import { db, withTx } from '../../db/client';
 import { concernCount, tripLogExists } from '../../db/sql';
 import { concerns, drivers, members, rides, tripLogs } from '../../db/schema';
 import { ah, parse, uuidParam } from '../../lib/http';
+import { pageFrom } from '../../lib/pagination';
 import { AppError, conflict, notFound } from '../../lib/errors';
 import { currentUser, requireRole } from '../../middleware/auth';
 import { actorFrom, audit } from '../../services/audit';
@@ -21,7 +22,11 @@ export const signoffRouter = Router();
 signoffRouter.get(
   '/queue',
   requireRole('safeguarding'),
-  ah(async (_req, res) => {
+  ah(async (req, res) => {
+    // ?stage=ready (both logs in / 72h passed) or ?stage=waiting (waiting for logs); default both.
+    const page = pageFrom(req);
+    const stage = req.query.stage === 'ready' ? (['logged'] as const) : req.query.stage === 'waiting' ? (['completed'] as const) : (['completed', 'logged'] as const);
+    const where = inArray(rides.status, [...stage]);
     const openConcerns = concernCount(true);
     const rows = await db
       .select({
@@ -41,9 +46,12 @@ signoffRouter.get(
       .from(rides)
       .innerJoin(members, eq(members.id, rides.memberId))
       .leftJoin(drivers, eq(drivers.id, rides.driverId))
-      .where(inArray(rides.status, ['completed', 'logged']))
-      .orderBy(desc(sql`${rides.status} = 'logged'`), desc(openConcerns), asc(rides.pickupAt));
+      .where(where)
+      .orderBy(desc(sql`${rides.status} = 'logged'`), desc(openConcerns), asc(rides.pickupAt), asc(rides.id))
+      .limit(page.limit)
+      .offset(page.offset);
     res.json({
+      pagination: page.meta(await db.$count(rides, where)),
       trips: rows.map((r) => ({
         ...r,
         statusLabel: RIDE_STATUS_LABELS[r.status],

@@ -8,7 +8,7 @@ import { fetcher } from '@/lib/api';
 import { homeFor, signOut, useMe, type Me } from '@/lib/session';
 import { Brand, Loading } from './ui';
 import { Bell } from './icons';
-import { AlertsPrompt, useMessageAlerts } from './alerts';
+import { AlertsPrompt, BELL_KEY, useMessageAlerts } from './alerts';
 
 /** Loads the signed-in user and checks the role before rendering a screen. The API re-checks every call. */
 export function RoleGate({ roles, children }: { roles: Role[]; children: (me: Me) => ReactNode }) {
@@ -33,7 +33,7 @@ export function RoleGate({ roles, children }: { roles: Role[]; children: (me: Me
 }
 
 function NotificationsLink() {
-  const { data } = useSWR<{ unread: number; notifications: { kind: string; readAt: string | null }[] }>('/notifications', fetcher, {
+  const { data } = useSWR<{ unread: number; notifications: { kind: string; readAt: string | null }[] }>(BELL_KEY, fetcher, {
     refreshInterval: 20_000,
     refreshWhenHidden: true,
   });

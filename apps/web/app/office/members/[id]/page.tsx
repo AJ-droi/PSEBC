@@ -1,10 +1,10 @@
 'use client';
-import { formatUkPhone } from '@psebc/shared';
 import Link from 'next/link';
 import { Suspense, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
-import { BOOKED_BY, CONTACT_METHODS, HEALTH_FLAGS, HELP_NEEDED, MOBILITY_AIDS, VEHICLE_REQUIREMENTS, labelList } from '@psebc/shared';
+import { Pager, usePage } from '@/components/pager';
+import { BOOKED_BY, CONTACT_METHODS, HEALTH_FLAGS, HELP_NEEDED, MOBILITY_AIDS, VEHICLE_REQUIREMENTS, formatUkPhone, labelList, type PageMeta } from '@psebc/shared';
 import { DesktopShell } from '@/components/shells';
 import { ErrorBox, KV, Loading, RideChip, Tags, TextArea, TextField } from '@/components/ui';
 import { fetcher, post } from '@/lib/api';
@@ -31,7 +31,8 @@ function Inner({ me }: { me: Me }) {
   const { id } = useParams<{ id: string }>();
   const sp = useSearchParams();
   const { data, error, mutate } = useSWR<{ member: MemberProfile }>(`/members/${id}`, fetcher);
-  const { data: rides } = useSWR<{ upcoming: Item[]; past: Item[] }>(`/rides?memberId=${id}`, fetcher);
+  const history = usePage('/rides/history', { memberId: id }, 10);
+  const { data: rides } = useSWR<{ rides: Item[]; pagination: PageMeta }>(history.key, fetcher, { keepPreviousData: true });
   if (error) return <ErrorBox error={error} />;
   if (!data) return <Loading />;
   const m = data.member;
@@ -114,7 +115,7 @@ function Inner({ me }: { me: Me }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {[...rides.upcoming, ...rides.past].map((r) => (
+                  {rides.rides.map((r) => (
                     <tr key={r.id}>
                       <td>
                         <Link href={`/office/rides/${r.id}`}>{when(r.pickupAt)}</Link>
@@ -129,6 +130,7 @@ function Inner({ me }: { me: Me }) {
                 </tbody>
               </table>
             )}
+            <Pager pagination={rides?.pagination} onPage={history.setPage} noun="lifts" />
           </section>
         </div>
         {me.user.role === 'admin' && !closed ? (

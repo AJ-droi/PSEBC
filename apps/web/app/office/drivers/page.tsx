@@ -1,10 +1,11 @@
 'use client';
 import Link from 'next/link';
 import useSWR from 'swr';
-import { HELP_CAPS, VEHICLE_CAPS, labelList, type DriverStatus } from '@psebc/shared';
+import { HELP_CAPS, VEHICLE_CAPS, labelList, type DriverStatus, type PageMeta } from '@psebc/shared';
 import { DesktopShell } from '@/components/shells';
 import { DriverChip, Loading } from '@/components/ui';
 import { fetcher } from '@/lib/api';
+import { Pager, usePage } from '@/components/pager';
 import { date } from '@/lib/format';
 
 interface Row {
@@ -29,7 +30,8 @@ export default function Drivers() {
 }
 
 function Inner({ admin }: { admin: boolean }) {
-  const { data } = useSWR<{ drivers: Row[] }>('/drivers', fetcher);
+  const { key, setPage } = usePage('/drivers');
+  const { data } = useSWR<{ drivers: Row[]; pagination: PageMeta }>(key, fetcher, { keepPreviousData: true });
   return (
     <>
       <div className="d-head">
@@ -75,6 +77,7 @@ function Inner({ admin }: { admin: boolean }) {
             </table>
           </div>
         )}
+        <Pager pagination={data?.pagination} onPage={setPage} noun="drivers" />
       </section>
     </>
   );

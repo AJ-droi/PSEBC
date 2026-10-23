@@ -4,6 +4,8 @@ import useSWR from 'swr';
 import { DesktopShell } from '@/components/shells';
 import { Loading, SelectField } from '@/components/ui';
 import { fetcher } from '@/lib/api';
+import { Pager, usePage } from '@/components/pager';
+import type { PageMeta } from '@psebc/shared';
 import { when } from '@/lib/format';
 
 interface E {
@@ -20,7 +22,8 @@ interface E {
 /** Audit trail — who saw and changed what (PRD §4, §9). */
 export default function Audit() {
   const [type, setType] = useState('');
-  const { data } = useSWR<{ entries: E[] }>(`/admin/audit?entityType=${type}`, fetcher);
+  const { key, setPage } = usePage('/admin/audit', { entityType: type }, 50);
+  const { data } = useSWR<{ entries: E[]; pagination: PageMeta }>(key, fetcher, { keepPreviousData: true });
   return (
     <DesktopShell roles={['safeguarding', 'admin']}>
       {() => (
@@ -62,6 +65,7 @@ export default function Audit() {
                 </table>
               </div>
             )}
+            <Pager pagination={data?.pagination} onPage={setPage} noun="entries" />
           </section>
         </>
       )}

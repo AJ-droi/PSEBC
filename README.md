@@ -70,7 +70,7 @@ Commit the generated files in `apps/api/drizzle/` with the schema change.
 
 ```bash
 npm test -w @psebc/shared   # 36 unit tests: matching rules, ride status machine, UK phone numbers
-TEST_DATABASE_URL=postgresql://... npm test -w @psebc/api   # 30 journey tests on a real database
+TEST_DATABASE_URL=postgresql://... npm test -w @psebc/api   # 31 journey tests on a real database
 npm run typecheck && npm run build
 ```
 

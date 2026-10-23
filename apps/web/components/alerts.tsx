@@ -4,6 +4,9 @@ import { useSWRConfig } from 'swr';
 import { chime, dismissPrompt, enablePushAlerts, promptDismissed, pushState, unlockAudioOnFirstTap, type PushState } from '@/lib/alerts';
 import { Bell } from './icons';
 
+/** The bell only needs the unread count and the newest few messages. */
+export const BELL_KEY = '/notifications?pageSize=5';
+
 const URGENT = new Set(['not_at_pickup', 'concern', 'felt_unsafe', 'invite']);
 
 interface Inbox {
@@ -24,7 +27,7 @@ export function useMessageAlerts(inbox: Inbox | undefined): void {
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
     const onMessage = (e: MessageEvent) => {
-      if ((e.data as { type?: string })?.type === 'psebc-push') void mutate('/notifications');
+      if ((e.data as { type?: string })?.type === 'psebc-push') void mutate(BELL_KEY);
     };
     navigator.serviceWorker.addEventListener('message', onMessage);
     return () => navigator.serviceWorker.removeEventListener('message', onMessage);

@@ -1,7 +1,8 @@
 'use client';
 import Link from 'next/link';
 import useSWR from 'swr';
-import { CONCERN_KINDS, labelList } from '@psebc/shared';
+import { CONCERN_KINDS, labelList, type PageMeta } from '@psebc/shared';
+import { Pager, usePage } from '@/components/pager';
 import { DesktopShell } from '@/components/shells';
 import { Loading } from '@/components/ui';
 import { Alert } from '@/components/icons';
@@ -32,10 +33,14 @@ export default function Incidents() {
 }
 
 function Inner() {
-  const { data } = useSWR<{ concerns: C[] }>('/concerns', fetcher, { refreshInterval: 30_000 });
+  const openPage = usePage('/concerns', { status: 'open' });
+  const donePage = usePage('/concerns', { status: 'reviewed' });
+  const { data } = useSWR<{ concerns: C[]; pagination: PageMeta }>(openPage.key, fetcher, { refreshInterval: 30_000, keepPreviousData: true });
+  const { data: done } = useSWR<{ concerns: C[]; pagination: PageMeta }>(donePage.key, fetcher, { keepPreviousData: true });
   const { data: summary } = useSWR<{ ready: number; pending_drivers: number }>('/safeguarding/summary', fetcher);
-  const open = data?.concerns.filter((c) => c.status === 'open') ?? [];
-  const reviewed = data?.concerns.filter((c) => c.status === 'reviewed') ?? [];
+  const open = data?.concerns ?? [];
+  const openTotal = data?.pagination.total ?? 0;
+  const reviewed = done?.concerns ?? [];
 
   return (
     <>
@@ -43,7 +48,7 @@ function Inner() {
         <div>
           <h1 className="d-title">Incidents</h1>
           <p className="muted">
-            {open.length ? `${open.length} open incident${open.length === 1 ? '' : 's'} to review` : 'No open incidents'}
+            {openTotal ? `${openTotal} open incident${openTotal === 1 ? '' : 's'} to review` : 'No open incidents'}
             {summary ? ` · ${summary.ready} trip${summary.ready === 1 ? '' : 's'} ready to sign off · ${summary.pending_drivers} driver${summary.pending_drivers === 1 ? '' : 's'} to approve` : ''}
           </p>
         </div>
@@ -62,7 +67,7 @@ function Inner() {
       {data ? (
         <section aria-labelledby="open" className="stack">
           <h2 id="open" className="h2">
-            Open incidents {open.length ? <span className="badge" style={{ background: 'var(--alert)', color: '#fff' }}>{open.length}</span> : null}
+            Open incidents {openTotal ? <span className="badge" style={{ background: 'var(--alert)', color: '#fff' }}>{openTotal}</span> : null}
           </h2>
           {open.length === 0 ? (
             <div className="success">Nothing waiting. Every reported incident has been reviewed.</div>
@@ -90,6 +95,7 @@ function Inner() {
               ))}
             </div>
           )}
+          <Pager pagination={data.pagination} onPage={openPage.setPage} noun="open incidents" />
         </section>
       ) : null}
 
@@ -127,6 +133,7 @@ function Inner() {
               </tbody>
             </table>
           </div>
+          <Pager pagination={done?.pagination} onPage={donePage.setPage} noun="reviewed incidents" />
         </section>
       ) : null}
     </>

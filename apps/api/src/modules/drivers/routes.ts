@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, isNull, or, sql } from 'drizzle-orm';
 import { DRIVER_STATUSES, RULES, driverCreateSchema, driverDecisionSchema, driverUpdateSchema, closeAccountSchema, type DriverCreateInput, type DriverStatus } from '@psebc/shared';
 import { db, withTx } from '../../db/client';
 import { documents, driverExclusions, drivers, members, rideInvites, type Driver } from '../../db/schema';
 import { ah, parse, uuidParam } from '../../lib/http';
+import { pageFrom } from '../../lib/pagination';
 import { AppError, badRequest, notFound } from '../../lib/errors';
 import { currentUser, requireRole } from '../../middleware/auth';
 import { actorFrom, audit } from '../../services/audit';
@@ -87,17 +88,32 @@ driversRouter.post(
 
 // ---- Office / safeguarding -----------------------------------------------
 
+/**
+ * Driver list, one page at a time.
+ * Filters: `status` (pending, approved…), `view=expiring` (approved with a check due in 30 days, or expired), `q` (name).
+ */
 driversRouter.get(
   '/',
   requireRole('admin', 'safeguarding', 'coordinator'),
   ah(async (req, res) => {
+    const page = pageFrom(req);
     const status = String(req.query.status ?? '');
+    const term = String(req.query.q ?? '').trim();
+    const soon = new Date(Date.now() + RULES.expiryReminderDays * 86_400_000).toISOString().slice(0, 10);
+    const earliest = sql`LEAST(${drivers.approvedUntil}, ${drivers.dbsRenewalDate}, ${drivers.insuranceExpiry})`;
+    const where = and(
+      DRIVER_STATUSES.includes(status as DriverStatus) ? eq(drivers.status, status as DriverStatus) : undefined,
+      req.query.view === 'expiring' ? or(eq(drivers.status, 'expired'), and(eq(drivers.status, 'approved'), sql`${earliest} <= ${soon}::date`)) : undefined,
+      term ? ilike(drivers.fullName, `%${term}%`) : undefined,
+    );
     const rows = await db
       .select()
       .from(drivers)
-      .where(DRIVER_STATUSES.includes(status as DriverStatus) ? eq(drivers.status, status as DriverStatus) : undefined)
-      .orderBy(sql`CASE ${drivers.status} WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END`, asc(drivers.fullName));
-    const soon = new Date(Date.now() + RULES.expiryReminderDays * 86_400_000).toISOString().slice(0, 10);
+      .where(where)
+      .orderBy(sql`CASE ${drivers.status} WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END`, asc(drivers.fullName), asc(drivers.id))
+      .limit(page.limit)
+      .offset(page.offset);
+    const total = await db.$count(drivers, where);
     const user = currentUser(req);
     res.json({
       drivers: rows.map((d) => ({
@@ -115,6 +131,7 @@ driversRouter.get(
         expiringSoon: d.status === 'approved' && earliestExpiry(d) <= soon,
         reapproval: d.status === 'pending' && !!d.decidedAt,
       })),
+      pagination: page.meta(total),
     });
   }),
 );

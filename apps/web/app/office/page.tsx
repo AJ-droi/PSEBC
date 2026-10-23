@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import useSWR from 'swr';
-import type { RideDisplayStatus } from '@psebc/shared';
+import type { PageMeta, RideDisplayStatus } from '@psebc/shared';
+import { Pager, usePage } from '@/components/pager';
 import { DesktopShell } from '@/components/shells';
 import { ErrorBox, Loading, RideChip } from '@/components/ui';
 import { fetcher, post } from '@/lib/api';
@@ -15,6 +16,8 @@ interface Overview {
   week: { from: string; to: string };
   attention: { type: 'no_driver' | 'not_at_pickup' | 'phone_log'; rideId: string; memberId?: string; memberName: string; phone: string; emergencyPhone?: string; pickupAt: string; detail: string }[];
   tasks: { id: string; title: string; body: string; link: string | null; createdAt: string }[];
+  pagination: PageMeta;
+  attentionCapped: boolean;
   upcoming: { id: string; memberName: string; pickupAt: string; destination: string; displayStatus: RideDisplayStatus; statusLabel: string; driverName: string | null; bookedBy: string }[];
 }
 
@@ -28,7 +31,8 @@ export default function Office() {
 function Inner() {
   const [offset, setOffset] = useState(0);
   const from = startOfWeek(offset);
-  const { data, error, mutate } = useSWR<Overview>(`/office/overview?from=${from.toISOString()}`, fetcher, { refreshInterval: 30_000 });
+  const { key, setPage } = usePage('/office/overview', { from: from.toISOString() });
+  const { data, error, mutate } = useSWR<Overview>(key, fetcher, { refreshInterval: 30_000, keepPreviousData: true });
   const router = useRouter();
   const [resent, setResent] = useState<string | null>(null);
 
@@ -59,7 +63,7 @@ function Inner() {
           <section className="section" aria-labelledby="up">
             <div className="between">
               <h2 id="up">Upcoming lifts</h2>
-              <span className="muted">{data.upcoming.length} lifts</span>
+              <span className="muted">{data.pagination.total} lifts</span>
             </div>
             <div className="table-wrap">
               <table className="data">
@@ -98,6 +102,7 @@ function Inner() {
                 </tbody>
               </table>
             </div>
+            <Pager pagination={data.pagination} onPage={setPage} noun="lifts" />
           </section>
 
           <section className="section" aria-labelledby="att">
@@ -106,6 +111,7 @@ function Inner() {
             </h2>
             {resent ? <p className="success">{resent}</p> : null}
             {data.attention.length + data.tasks.length === 0 ? <p className="muted">Nothing needs you right now.</p> : null}
+            {data.attentionCapped ? <p className="small muted">Showing the first 50 of each kind. Deal with these and more will appear.</p> : null}
             {data.attention.map((a) => (
               <div key={a.type + a.rideId} className={`attention${a.type === 'not_at_pickup' ? ' red' : ''}`}>
                 <strong>{LABELS[a.type]}</strong>

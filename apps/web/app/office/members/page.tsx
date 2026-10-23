@@ -6,6 +6,8 @@ import useSWR from 'swr';
 import { DesktopShell } from '@/components/shells';
 import { Loading } from '@/components/ui';
 import { fetcher } from '@/lib/api';
+import { Pager, usePage } from '@/components/pager';
+import type { PageMeta } from '@psebc/shared';
 
 interface Row {
   id: string;
@@ -24,7 +26,8 @@ export default function Members() {
 
 function Inner() {
   const [q, setQ] = useState('');
-  const { data } = useSWR<{ members: Row[] }>(`/members?q=${encodeURIComponent(q)}`, fetcher);
+  const { key, setPage } = usePage('/members', { q: q.trim() });
+  const { data } = useSWR<{ members: Row[]; pagination: PageMeta }>(key, fetcher, { keepPreviousData: true });
   return (
     <>
       <div className="d-head">
@@ -70,8 +73,10 @@ function Inner() {
                 ))}
               </tbody>
             </table>
+            {data.members.length === 0 ? <p className="muted">No members match “{q}”.</p> : null}
           </div>
         )}
+        <Pager pagination={data?.pagination} onPage={setPage} noun="members" />
       </section>
     </>
   );

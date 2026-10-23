@@ -22,9 +22,11 @@ export function toMemberDto(m: Member, opts: { includeHealth: boolean }) {
   return { ...rest, healthFlags: h?.flags ?? null, unwellInstructions: h?.unwellInstructions ?? null };
 }
 
-export async function searchMembers(q: string, limit = 50) {
+/** Office member search, one page at a time (default 20 per page). */
+export async function searchMembers(q: string, page: { limit: number; offset: number }) {
   const term = q.trim();
-  return db
+  const where = term ? or(ilike(members.fullName, `%${term}%`), ilike(members.preferredName, `%${term}%`)) : undefined;
+  const rows = await db
     .select({
       id: members.id,
       fullName: members.fullName,
@@ -36,7 +38,10 @@ export async function searchMembers(q: string, limit = 50) {
       status: members.status,
     })
     .from(members)
-    .where(term ? or(ilike(members.fullName, `%${term}%`), ilike(members.preferredName, `%${term}%`)) : undefined)
-    .orderBy(asc(members.status), asc(members.fullName))
-    .limit(limit);
+    .where(where)
+    .orderBy(asc(members.status), asc(members.fullName), asc(members.id))
+    .limit(page.limit)
+    .offset(page.offset);
+  const total = await db.$count(members, where);
+  return { rows, total };
 }
