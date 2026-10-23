@@ -46,10 +46,10 @@ function Home({ name }: { name: string }) {
           </h2>
           {data.upcoming.length === 0 ? <p className="muted">You have no lifts booked.</p> : null}
           {data.upcoming.map((r) => (
-            <Link key={r.id} className={`card${r.status === 'driver_found' ? ' highlight' : ''}`} href={`/member/rides/${r.id}`}>
+            <Link key={r.id} className={`card${r.displayStatus === 'driver_found' ? ' highlight' : ''}`} href={`/member/rides/${r.id}`}>
               <div className="between">
                 <strong style={{ fontSize: '1.125rem' }}>{dayLong(r.pickupAt)}</strong>
-                <RideChip status={r.status} />
+                <RideChip status={r.displayStatus} />
               </div>
               <span className="muted">
                 Pick up {time(r.pickupAt)} · {r.destination.replace('Princes Street Church: ', '')}

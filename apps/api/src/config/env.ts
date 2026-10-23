@@ -17,6 +17,10 @@ const schema = z.object({
   NOTIFY_EMAIL_DRIVER: z.enum(['console', 'webhook', 'none']).default('console'),
   NOTIFY_SMS_DRIVER: z.enum(['console', 'webhook', 'none']).default('console'),
   NOTIFY_WEBHOOK_URL: z.string().optional().default(''),
+  // Web Push (phone/desktop alerts with sound when the app is closed). Generate with `npx web-push generate-vapid-keys`.
+  VAPID_PUBLIC_KEY: z.string().optional().default(''),
+  VAPID_PRIVATE_KEY: z.string().optional().default(''),
+  VAPID_SUBJECT: z.string().optional().default('mailto:office@example.org'),
   REPORTS_SHOW_MEMBER_NAMES: z
     .string()
     .default('false')
@@ -39,6 +43,8 @@ export function env(): Env {
 }
 
 /** Test helper: re-read process.env after it is changed. */
+export const pushEnabled = () => !!(env().VAPID_PUBLIC_KEY && env().VAPID_PRIVATE_KEY);
+
 export function resetEnvCache(): void {
   cached = null;
 }

@@ -227,6 +227,8 @@ export const rides = pgTable(
     signoffOutcome: text('signoff_outcome'),
     signoffNotes: text('signoff_notes'),
     reminderSentAt: tstz('reminder_sent_at'),
+    /** Set when a concern is reported or a log flags a problem; drives the "Incident reported" status. */
+    incidentReportedAt: tstz('incident_reported_at'),
     createdAt: createdAt(),
     updatedAt: tstz('updated_at').notNull().defaultNow(),
   },
@@ -327,7 +329,7 @@ export const notifications = pgTable(
     userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
     /** For members without a login (text/phone). */
     memberId: uuid('member_id').references(() => members.id, { onDelete: 'cascade' }),
-    channel: text('channel').$type<'in_app' | 'email' | 'sms' | 'phone_task'>().notNull(),
+    channel: text('channel').$type<'in_app' | 'email' | 'sms' | 'phone_task' | 'push'>().notNull(),
     toAddress: text('to_address'),
     kind: text('kind').notNull(),
     title: text('title').notNull(),
@@ -341,10 +343,28 @@ export const notifications = pgTable(
     createdAt: createdAt(),
   },
   (t) => [
-    check('notifications_channel', sql`${t.channel} IN ('in_app', 'email', 'sms', 'phone_task')`),
-    index('notifications_outbox_idx').on(t.createdAt).where(sql`${t.delivered} = false AND ${t.channel} IN ('email', 'sms')`),
+    check('notifications_channel', sql`${t.channel} IN ('in_app', 'email', 'sms', 'phone_task', 'push')`),
+    index('notifications_outbox_idx').on(t.createdAt).where(sql`${t.delivered} = false AND ${t.channel} IN ('email', 'sms', 'push')`),
     index('notifications_user_idx').on(t.userId, t.createdAt.desc()).where(sql`${t.channel} = 'in_app'`),
   ],
+);
+
+// ---------- Web Push subscriptions (one per device/browser that turned alerts on) ----------
+export const pushSubscriptions = pgTable(
+  'push_subscriptions',
+  {
+    id: id(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    endpoint: text('endpoint').notNull().unique(),
+    p256dh: text('p256dh').notNull(),
+    auth: text('auth').notNull(),
+    userAgent: text('user_agent'),
+    createdAt: createdAt(),
+    lastUsedAt: tstz('last_used_at'),
+  },
+  (t) => [index('push_subscriptions_user_idx').on(t.userId)],
 );
 
 // ---------- Audit trail (PRD §9). Append-only — enforced by a trigger in migration 0001. ----------
@@ -380,3 +400,4 @@ export type RideInvite = typeof rideInvites.$inferSelect;
 export type TripLog = typeof tripLogs.$inferSelect;
 export type Concern = typeof concerns.$inferSelect;
 export type Notification = typeof notifications.$inferSelect;
+export type PushSubscriptionRow = typeof pushSubscriptions.$inferSelect;

@@ -67,6 +67,22 @@ The app records concerns; it does not replace the church's safeguarding procedur
 **Reports** → pick the month → **Download as spreadsheet** if you need it in Excel. The report never
 shows health information.
 
+## Incidents
+
+When a driver or member reports a concern, or a driver answers "Anything to report?" with Yes, or a member
+says they didn't feel safe, the lift shows a red **Incident reported** label everywhere — on the Lifts page,
+on the lift itself and on the member's own screen — until safeguarding signs the trip off. Only the
+safeguarding lead can read what was reported.
+
+When the safeguarding lead signs in, the first page is **Incidents**, with open incidents at the top and a
+**Review now** button for each.
+
+## Message alerts
+
+Every screen plays a short sound when a new message arrives. Under **Messages** each person can test the
+sound, switch it off on that device, or **Turn on alerts** so their phone rings even when the app is closed.
+On iPhone, add PSEBC Lifts to the Home Screen first. Signing out turns alerts off on that device.
+
 ## Changing settings
 
 Settings such as "hours before a lift with no driver is flagged" and the church office phone number are

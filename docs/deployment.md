@@ -55,7 +55,24 @@ flow that accepts JSON `{ channel, to, subject, body }` — for example a **Powe
 church's Microsoft 365 (dependency in PRD §11) or GOV.UK Notify / Twilio. Only the webhook adapter in
 `apps/api/src/services/notify.ts` needs changing if a provider needs a different format.
 
-## 6. First real users
+## 6. Message alerts with sound
+
+* **While the app is open**, every signed-in screen plays a short chime (and vibrates phones) when a new
+  message arrives. Nothing to set up. People can switch the sound off under **Messages**.
+* **When the app is closed or the phone is locked**, the app uses Web Push. Generate the keys once:
+
+  ```bash
+  npx web-push generate-vapid-keys
+  ```
+
+  Put them in the API environment as `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` (plus `VAPID_SUBJECT`,
+  e.g. `mailto:office@princesstreet.org`). Keep the private key secret; changing the keys means everyone
+  has to turn alerts on again. Each person then taps **Turn on alerts** once on each device.
+* **iPhone/iPad:** alerts only work after the app is added to the Home Screen (iOS 16.4 or later).
+* **Privacy:** an alert shows on the lock screen, so it carries only a generic title such as
+  "New lift request" — never names, addresses, times or health information.
+
+## 7. First real users
 
 1. Sign in as the seeded admin **only on a demo database**. On the live database, create the first admin
    directly:
@@ -68,7 +85,7 @@ church's Microsoft 365 (dependency in PRD §11) or GOV.UK Notify / Twilio. Only 
    authenticator app on first sign-in.
 3. Settings such as the church office phone number live in the `settings` table.
 
-## 7. Backups
+## 8. Backups
 
 Neon keeps point-in-time history (free plan: 24 h). Add a weekly `pg_dump` (e.g. a GitHub Action writing to
 the church's OneDrive) if longer retention is required by the safeguarding policy (trip logs: 6 years).

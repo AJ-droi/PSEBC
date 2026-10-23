@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useId, type ReactNode, type InputHTMLAttributes, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
-import { RIDE_STATUS_LABELS, DRIVER_STATUS_LABELS, type RideStatus, type DriverStatus } from '@psebc/shared';
+import { RIDE_DISPLAY_LABELS, DRIVER_STATUS_LABELS, type RideDisplayStatus, type DriverStatus } from '@psebc/shared';
 import { Back } from './icons';
 
 export function Brand({ suffix }: { suffix?: string }) {
@@ -184,8 +184,19 @@ export function CheckCards<T extends string>({
   );
 }
 
-export function RideChip({ status }: { status: RideStatus }) {
-  return <span className={`chip chip-${status}`}>{RIDE_STATUS_LABELS[status]}</span>;
+/** Ride status chip. Pass the API's `displayStatus` so "Incident reported" shows until sign-off. */
+export function RideChip({ status }: { status: RideDisplayStatus }) {
+  return (
+    <span className={`chip chip-${status}`}>
+      {status === 'incident' ? (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true" style={{ marginRight: 5 }}>
+          <path d="M12 8v5M12 17h.01" />
+          <circle cx="12" cy="12" r="10" />
+        </svg>
+      ) : null}
+      {RIDE_DISPLAY_LABELS[status]}
+    </span>
+  );
 }
 
 export function DriverChip({ status }: { status: DriverStatus }) {

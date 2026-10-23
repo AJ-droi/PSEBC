@@ -17,6 +17,9 @@ process.env.DATA_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64');
 process.env.RUN_SCHEDULER = 'false';
 process.env.NOTIFY_EMAIL_DRIVER = 'none';
 process.env.NOTIFY_SMS_DRIVER = 'none';
+// Phone alerts on, with a fake push service that records what would be sent.
+process.env.VAPID_PUBLIC_KEY = 'BOrCuS0f0qMcFSmo6QuSbxBo0kLZE0CHqwFWlSaaXJ-mBnu-jMr9cl3zHk4_Gx6qWJvKdKmD8jN5QXJfiGwDeQ0';
+process.env.VAPID_PRIVATE_KEY = 'test-private-key';
 
 const { createApp } = await import('../src/app');
 const { getDb, closeDb } = await import('../src/db/client');
@@ -24,6 +27,13 @@ const { getDb, closeDb } = await import('../src/db/client');
 const query = async <T = Record<string, unknown>>(text: string, params: unknown[] = []): Promise<T[]> => (await getDb().$client.query(text, params)).rows as T[];
 const { seed } = await import('../src/db/seed');
 const jobs = await import('../src/jobs/tasks');
+const { flushOutbox } = await import('../src/services/notify');
+const pushSent: { endpoint: string; payload: { title: string; body: string; url: string } }[] = [];
+(await import('../src/services/push')).setPushSender({
+  async send(sub, payload) {
+    pushSent.push({ endpoint: sub.endpoint, payload });
+  },
+});
 
 let app: Express;
 type Agent = ReturnType<typeof request.agent>;
@@ -34,6 +44,17 @@ const inDays = (d: number, h = 9, m = 45) => {
   t.setUTCHours(h, m, 0, 0);
   return t.toISOString();
 };
+
+/** Deliver everything queued (a background flush may already be running). */
+async function drainOutbox() {
+  for (let i = 0; i < 100; i++) {
+    await flushOutbox(500);
+    const [left] = await query<{ n: number }>(`SELECT count(*)::int AS n FROM notifications WHERE delivered = false AND channel IN ('email','sms','push') AND attempts < 5`);
+    if (left!.n === 0) return;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error('outbox did not drain');
+}
 
 async function login(email: string) {
   const agent = request.agent(app);
@@ -327,7 +348,7 @@ describe('PSEBC journey', () => {
     });
     expect(concern.status).toBe(201);
     const notified = await query(`SELECT channel FROM notifications n JOIN users u ON u.id = n.user_id WHERE u.role = 'safeguarding' AND n.kind = 'concern'`);
-    expect(notified.map((n) => n.channel).sort()).toEqual(['email', 'in_app']); // + sms when the lead has a phone on file
+    expect(notified.map((n) => n.channel).sort()).toEqual(['email', 'in_app', 'push']); // + sms when the lead has a phone on file
     expect((await coordinator.get('/api/concerns')).status).toBe(403);
     expect((await admin.get('/api/concerns')).status).toBe(403);
     expect((await safeguarding.get('/api/concerns')).body.concerns.length).toBe(1);
@@ -399,6 +420,63 @@ describe('PSEBC journey', () => {
     const phoneLogs = overview.body.attention.filter((a: { type: string }) => a.type === 'phone_log');
     expect(phoneLogs.map((a: { rideId: string }) => a.rideId)).toContain(r.body.id);
     expect(phoneLogs.every((a: { memberName: string }) => a.memberName !== 'Margaret Evans')).toBe(true); // Margaret has a login
+  });
+
+  it('Incident reported: once a driver reports a concern, member and office see "Incident reported" until sign-off', async () => {
+    const r = await margaret.post('/api/rides').send(ridePayload({ pickupAt: inDays(18), returnAt: null, returnNeeded: false }));
+    expect((await david.post(`/api/rides/${r.body.id}/accept`).send()).status).toBe(200);
+    const before = await margaret.get(`/api/rides/${r.body.id}`);
+    expect(before.body.ride.displayStatus).toBe('driver_found');
+
+    const concern = await david.post('/api/concerns').send({
+      rideId: r.body.id,
+      occurredWhen: '9:40 am',
+      occurredWhere: 'Outside the house',
+      kinds: ['safety_wellbeing'],
+      description: 'Margaret seemed confused about where she was going.',
+      anyoneHurt: false,
+      emergencyServicesCalled: false,
+      familyTold: 'unsure',
+    });
+    expect(concern.status).toBe(201);
+
+    const member = await margaret.get(`/api/rides/${r.body.id}`);
+    expect(member.body.ride).toMatchObject({ status: 'driver_found', displayStatus: 'incident', statusLabel: 'Incident reported' });
+    expect(JSON.stringify(member.body)).not.toContain('confused'); // the report itself stays with safeguarding
+
+    const list = await margaret.get('/api/rides');
+    expect(list.body.upcoming.find((x: { id: string }) => x.id === r.body.id)).toMatchObject({ displayStatus: 'incident' });
+
+    const office = await coordinator.get('/api/office/overview').query({ from: inDays(-1, 0, 0) });
+    // overview shows one week; look this ride up on the office ride page instead
+    const officeRide = await admin.get(`/api/rides/${r.body.id}`);
+    expect(officeRide.body.ride.displayStatus).toBe('incident');
+    expect(office.status).toBe(200);
+
+    const queue = await safeguarding.get('/api/concerns');
+    expect(queue.body.concerns[0]).toMatchObject({ rideId: r.body.id, status: 'open' }); // newest open incident first
+  });
+
+  it('Phone alerts: a device can subscribe, and pushes carry no personal details', async () => {
+    expect((await david.get('/api/notifications/push-key')).body.publicKey).toMatch(/^B/);
+    const endpoint = 'https://push.example.test/david-phone';
+    const sub = await david.post('/api/notifications/push-subscribe').send({ endpoint, keys: { p256dh: 'p256dh-key-for-tests-0123456789', auth: 'auth-key-1234' } });
+    expect(sub.status).toBe(201);
+    expect((await david.post('/api/notifications/push-subscribe').send({ endpoint: 'http://insecure.test', keys: { p256dh: 'x'.repeat(20), auth: 'y'.repeat(10) } })).status).toBe(422);
+
+    pushSent.length = 0;
+    const r = await margaret.post('/api/rides').send(ridePayload({ pickupAt: inDays(20, 11, 0), returnAt: null, returnNeeded: false }));
+    expect(r.body.status).toBe('invites_sent');
+    await drainOutbox();
+    const toDavid = pushSent.filter((p) => p.endpoint === endpoint);
+    expect(toDavid.length).toBeGreaterThan(0);
+    expect(toDavid[0]!.payload).toMatchObject({ title: 'New lift request', url: `/driver/invites/${r.body.id}` });
+    const text = JSON.stringify(toDavid);
+    expect(text).not.toMatch(/Margaret|Barry|CF62|Example Road|Church/);
+
+    expect((await david.post('/api/notifications/push-unsubscribe').send({ endpoint })).status).toBe(200);
+    const left = await query(`SELECT 1 FROM push_subscriptions WHERE endpoint = $1`, [endpoint]);
+    expect(left.length).toBe(0);
   });
 
   it('PSEBC-10 (1.4): reminder 30 days before expiry; on expiry status becomes Expired automatically', async () => {

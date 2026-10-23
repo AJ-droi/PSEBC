@@ -44,8 +44,14 @@ function Inner() {
             {data.member.fullName} · {when(r.pickupAt)}
           </h1>
         </div>
-        <RideChip status={r.status} />
+        <RideChip status={r.displayStatus} />
       </div>
+      {r.displayStatus === 'incident' ? (
+        <div className="alert" role="status">
+          <strong>Incident reported on this lift</strong>
+          <p>The safeguarding lead has been told and holds the report. The lift stays at “Incident reported” until they sign the trip off.</p>
+        </div>
+      ) : null}
       {booked ? <p className="success">Lift booked. {data.member.preferredName} will be told by their chosen contact method.</p> : null}
       {msg ? <p className="success">{msg}</p> : null}
       <div className="d-grid">

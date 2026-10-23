@@ -151,6 +151,7 @@ a.card:hover { border-color: var(--pine); color: var(--ink); }
 .chip-completed { background: var(--pine); color: var(--mint); }
 .chip-logged { background: var(--blue-bg); color: var(--blue-ink); }
 .chip-signed_off { background: var(--ink); color: #ffffff; }
+.chip-incident { background: var(--alert); color: #ffffff; }
 .chip-cancelled, .chip-unmatched { background: var(--alert-bg); color: var(--alert); }
 .chip-pending, .chip-draft { background: var(--amber-bg); color: var(--amber-text); }
 .chip-approved { background: var(--mint); color: var(--pine); }

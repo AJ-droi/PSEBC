@@ -1,4 +1,4 @@
-import type { DriverStatus, HelpCap, RideStatus, VehicleCap } from '@psebc/shared';
+import type { DriverStatus, HelpCap, RideDisplayStatus, RideStatus, VehicleCap } from '@psebc/shared';
 
 export interface DriverCard {
   id: string;
@@ -10,6 +10,10 @@ export interface DriverCard {
 export interface RideCore {
   id: string;
   status: RideStatus;
+  /** What to show: the status, or 'incident' once an incident is reported (until sign-off). */
+  displayStatus: RideDisplayStatus;
+  statusLabel: string;
+  incidentReportedAt: string | null;
   pickupAt: string;
   destination: string;
   returnNeeded: boolean;

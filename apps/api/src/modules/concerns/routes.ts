@@ -9,7 +9,7 @@ import { formatWhen } from '../../lib/time';
 import { currentUser, requireAuth, requireRole } from '../../middleware/auth';
 import { actorFrom, audit } from '../../services/audit';
 import { flushSoon, notifyRole } from '../../services/notify';
-import { getRide } from '../rides/repo';
+import { getRide, markIncident } from '../rides/repo';
 
 export const concernsRouter = Router();
 
@@ -38,6 +38,7 @@ concernsRouter.post(
         .insert(concerns)
         .values({ ...input, rideId, reportedBy: user.id, reporterRole: user.role, reporterName: user.fullName, notifiedAt: sql`now()` })
         .returning({ id: concerns.id });
+      await markIncident(tx, rideId);
       await audit(actorFrom(req), { action: 'concern.report', entityType: 'concern', entityId: row!.id, details: { rideId, kinds: input.kinds, anyoneHurt: input.anyoneHurt } }, tx);
       await notifyRole(
         tx,

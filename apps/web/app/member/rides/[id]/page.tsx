@@ -42,14 +42,19 @@ function RideStatus() {
         <BackBar href="/member" label="Back to my lifts" crumb="My lifts" />
         <main className="screen" id="main">
           <div>
-            <span className="chip chip-driver_found">{r.status === 'driver_found' ? 'Lift confirmed' : RideChipText(r.status)}</span>
+            {r.displayStatus === 'incident' ? (
+              <RideChip status="incident" />
+            ) : (
+              <span className="chip chip-driver_found">{r.status === 'driver_found' ? 'Lift confirmed' : RideChipText(r.status)}</span>
+            )}
             <h1 className="title" style={{ marginTop: 12 }}>
-              {r.status === 'driver_found' ? 'Your driver is booked' : 'Your lift'}
+              {r.displayStatus === 'driver_found' ? 'Your driver is booked' : 'Your lift'}
             </h1>
             <p className="lede">
               {dayLong(r.pickupAt)}, {time(r.pickupAt)}
             </p>
           </div>
+          {r.displayStatus === 'incident' ? <IncidentNotice phone={phone} /> : null}
           <div className="panel" style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
             <span className="avatar lg" role="img" aria-label={`Photo of ${d.firstName}`}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -119,21 +124,24 @@ function RideStatus() {
       <BackBar href="/member" crumb="My lifts" />
       <main className="screen" id="main">
         <div>
-          {booked ? (
+          {r.displayStatus === 'incident' ? (
+            <RideChip status="incident" />
+          ) : booked ? (
             <span className="chip chip-driver_found">
               <Check /> &nbsp;Lift booked
             </span>
           ) : (
-            <RideChip status={r.status} />
+            <RideChip status={r.displayStatus} />
           )}
           <h1 className="title" style={{ marginTop: 12 }}>
-            {unmatched ? 'We’re still looking for a driver' : 'We’re finding you a driver'}
+            {r.displayStatus === 'incident' ? 'Your lift' : unmatched ? 'We’re still looking for a driver' : 'We’re finding you a driver'}
           </h1>
           <p className="lede">
             {dayLong(r.pickupAt)}, {time(r.pickupAt)} to {r.destination.replace('Princes Street Church: ', 'Princes Street Church, ')}.
             {r.returnNeeded && r.returnAt ? ` Lift home at ${time(r.returnAt)}.` : ''}
           </p>
         </div>
+        {r.displayStatus === 'incident' ? <IncidentNotice phone={phone} /> : null}
         <ol className="progress-list panel" aria-label="Progress">
           <li className="done">
             <span className="dot">
@@ -170,6 +178,16 @@ function RideStatus() {
         ) : null}
       </main>
     </>
+  );
+}
+
+/** Shown to the member while an incident on this lift is open (details stay with safeguarding). */
+function IncidentNotice({ phone }: { phone: string }) {
+  return (
+    <div className="alert" role="status">
+      <strong>An incident has been reported on this lift</strong>
+      <p>Our safeguarding lead has been told and may contact you. If you need help now, please phone the church office{phone ? ` on ${phone}` : ''}.</p>
+    </div>
   );
 }
 

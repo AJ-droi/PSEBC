@@ -5,8 +5,10 @@ import {
   HELP_NEEDED,
   MOBILITY_AIDS,
   VEHICLE_REQUIREMENTS,
+  RIDE_DISPLAY_LABELS,
   isCancellable,
   labelList,
+  rideDisplayStatus,
   postcodeArea,
 } from '@psebc/shared';
 import { db } from '../../db/client';
@@ -28,10 +30,16 @@ export function needsSummary(m: Pick<Member, 'mobilityAids' | 'helpNeeded' | 've
   return items;
 }
 
+/** Status plus what screens should show for it ("Incident reported" overrides until sign-off). */
+export function statusFields(r: Pick<Ride, 'status' | 'incidentReportedAt'>) {
+  const displayStatus = rideDisplayStatus(r.status, r.incidentReportedAt);
+  return { status: r.status, displayStatus, statusLabel: RIDE_DISPLAY_LABELS[displayStatus], incidentReportedAt: r.incidentReportedAt };
+}
+
 function rideCore(r: Ride) {
   return {
     id: r.id,
-    status: r.status,
+    ...statusFields(r),
     pickupAt: r.pickupAt,
     destination: r.destination,
     returnNeeded: r.returnNeeded,
@@ -248,7 +256,7 @@ export async function driverHome(driverId: string) {
     })),
     trips: trips.map(({ ride: r, preferredName, town, driverLogged }) => ({
       id: r.id,
-      status: r.status,
+      ...statusFields(r),
       pickupAt: r.pickupAt,
       memberName: preferredName,
       town,

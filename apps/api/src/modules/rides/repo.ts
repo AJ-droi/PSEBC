@@ -22,3 +22,11 @@ export async function setStatus(tx: Executor, id: string, status: RideStatus, ex
     .set({ ...extra, status, updatedAt: sql`now()` })
     .where(eq(rides.id, id));
 }
+
+/** Flag the ride as having an incident (first report wins; later reports keep the original time). */
+export async function markIncident(tx: Executor, rideId: string): Promise<void> {
+  await tx
+    .update(rides)
+    .set({ incidentReportedAt: sql`COALESCE(${rides.incidentReportedAt}, now())`, updatedAt: sql`now()` })
+    .where(eq(rides.id, rideId));
+}

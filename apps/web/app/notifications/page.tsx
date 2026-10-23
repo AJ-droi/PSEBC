@@ -1,6 +1,8 @@
 'use client';
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import useSWR from 'swr';
+import { chime, enablePushAlerts, pushState, setSoundEnabled, soundEnabled, type PushState } from '@/lib/alerts';
 import { BackBar, Loading } from '@/components/ui';
 import { RoleGate } from '@/components/shells';
 import { fetcher, post } from '@/lib/api';
@@ -39,6 +41,7 @@ export default function Notifications() {
                   Mark all read
                 </button>
               </div>
+              <AlertSettings />
               {!data ? <Loading /> : null}
               {data?.notifications.length === 0 ? <p className="muted">No messages yet.</p> : null}
               <div className="stack">
@@ -65,5 +68,55 @@ export default function Notifications() {
         )}
       </RoleGate>
     </div>
+  );
+}
+
+const PUSH_TEXT: Record<PushState, string> = {
+  on: 'On for this device',
+  off: 'Off',
+  denied: 'Blocked in this browser’s settings',
+  unsupported: 'Not available in this browser. On iPhone, add PSEBC Lifts to your Home Screen first.',
+  unavailable: 'Not set up by the church yet',
+};
+
+/** Sound and phone-alert settings for this device. */
+function AlertSettings() {
+  const [sound, setSound] = useState(true);
+  const [push, setPush] = useState<PushState | null>(null);
+  useEffect(() => {
+    setSound(soundEnabled());
+    pushState().then(setPush).catch(() => setPush('unsupported'));
+  }, []);
+  return (
+    <section className="panel" aria-labelledby="alerts-h">
+      <h2 id="alerts-h" className="h3">
+        Alerts on this device
+      </h2>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={sound}
+          onChange={(e) => {
+            setSound(e.target.checked);
+            setSoundEnabled(e.target.checked);
+            if (e.target.checked) chime();
+          }}
+        />{' '}
+        Play a sound for new messages
+      </label>
+      <div className="row">
+        <button type="button" className="btn btn-secondary sm" onClick={() => chime()} disabled={!sound}>
+          Test the sound
+        </button>
+      </div>
+      <p className="small">
+        <strong>Alerts when the app is closed:</strong> {push ? PUSH_TEXT[push] : 'Checking…'}
+      </p>
+      {push === 'off' ? (
+        <button type="button" className="btn btn-primary sm" style={{ alignSelf: 'flex-start' }} onClick={async () => setPush(await enablePushAlerts())}>
+          Turn on alerts
+        </button>
+      ) : null}
+    </section>
   );
 }

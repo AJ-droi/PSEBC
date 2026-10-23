@@ -120,7 +120,7 @@ function Inner({ me }: { me: Me }) {
                       </td>
                       <td>{r.destination.replace('Princes Street Church: ', '')}</td>
                       <td>
-                        <RideChip status={r.status} />
+                        <RideChip status={r.displayStatus} />
                       </td>
                       <td>{r.driverFirstName ?? '—'}</td>
                     </tr>

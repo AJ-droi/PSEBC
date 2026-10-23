@@ -30,6 +30,7 @@ signoffRouter.get(
         pickupAt: rides.pickupAt,
         completedAt: rides.completedAt,
         missingLogNote: rides.missingLogNote,
+        incidentReportedAt: rides.incidentReportedAt,
         memberName: members.preferredName,
         driverName: drivers.fullName,
         driverLogged: tripLogExists('driver'),

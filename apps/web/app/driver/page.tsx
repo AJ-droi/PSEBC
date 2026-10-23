@@ -2,9 +2,9 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import useSWR from 'swr';
-import type { RideStatus } from '@psebc/shared';
+import type { RideDisplayStatus, RideStatus } from '@psebc/shared';
 import { MobileShell } from '@/components/shells';
-import { ErrorBox, Loading } from '@/components/ui';
+import { ErrorBox, Loading, RideChip } from '@/components/ui';
 import { Shield } from '@/components/icons';
 import { fetcher, post } from '@/lib/api';
 import { date, dayShort, time, when } from '@/lib/format';
@@ -13,7 +13,7 @@ import { signOut } from '@/lib/session';
 interface Home {
   driver: { firstName: string; status: string; validTo: string | null; loneWorkingAcknowledged: boolean };
   invites: { id: string; pickupAt: string; pickupArea: string; destination: string; returnAt: string | null }[];
-  trips: { id: string; status: RideStatus; pickupAt: string; memberName: string; town: string; needsLog: boolean }[];
+  trips: { id: string; status: RideStatus; displayStatus: RideDisplayStatus; pickupAt: string; memberName: string; town: string; needsLog: boolean }[];
 }
 
 export default function DriverHome() {
@@ -98,7 +98,7 @@ function Inner() {
               <strong style={{ fontSize: '1.125rem' }}>
                 {dayShort(t.pickupAt)} · {t.memberName}
               </strong>
-              {t.needsLog ? <span className="chip chip-invites_sent">Log needed</span> : t.status === 'driver_found' ? <span className="chip chip-driver_found">Booked</span> : <span className="chip chip-logged">Logged</span>}
+              {t.displayStatus === 'incident' ? <RideChip status="incident" /> : t.needsLog ? <span className="chip chip-invites_sent">Log needed</span> : t.status === 'driver_found' ? <span className="chip chip-driver_found">Booked</span> : <span className="chip chip-logged">Logged</span>}
             </div>
             <span className="muted">{t.needsLog ? 'Tell us how the trip went' : `Pick up ${time(t.pickupAt)} · ${t.town}`}</span>
           </Link>

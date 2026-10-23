@@ -19,7 +19,7 @@ import { notifyDriver, notifyMember, notifyRole, notifyUsers } from '../../servi
 import type { SessionUser } from '../../middleware/auth';
 import { getMember } from '../members/repo';
 import { matchAndInvite } from './matching.service';
-import { getRide, lockRide, setStatus } from './repo';
+import { getRide, lockRide, markIncident, setStatus } from './repo';
 
 const OFFICE = ['coordinator', 'admin'] as const;
 const isOffice = (u: SessionUser) => (OFFICE as readonly string[]).includes(u.role);
@@ -330,6 +330,7 @@ export async function submitDriverLog(user: SessionUser, actor: Actor, rideId: s
     assertLoggable(ride);
     await tx.insert(tripLogs).values({ rideId, author: 'driver', submittedBy: user.id, submittedByRole: user.role, ...input });
     await audit(actor, { action: 'trip.driver_log', entityType: 'ride', entityId: rideId, details: { anythingToReport: input.anythingToReport, needsChanged: input.needsChanged } }, tx);
+    if (input.anythingToReport) await markIncident(tx, rideId);
     if (input.needsChanged) {
       await notifyRole(tx, ['coordinator'], {
         kind: 'needs_changed',
@@ -378,6 +379,7 @@ export async function submitMemberLog(
       });
     }
     if (!input.feltSafe) {
+      await markIncident(tx, rideId);
       // Story 5.3: 'No' to feeling safe opens the concern report — and safeguarding is told today.
       await notifyRole(
         tx,

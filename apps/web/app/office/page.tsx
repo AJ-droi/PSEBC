@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import useSWR from 'swr';
-import type { RideStatus } from '@psebc/shared';
+import type { RideDisplayStatus } from '@psebc/shared';
 import { DesktopShell } from '@/components/shells';
 import { ErrorBox, Loading, RideChip } from '@/components/ui';
 import { fetcher, post } from '@/lib/api';
@@ -14,7 +14,7 @@ interface Overview {
   week: { from: string; to: string };
   attention: { type: 'no_driver' | 'not_at_pickup' | 'phone_log'; rideId: string; memberId?: string; memberName: string; phone: string; emergencyPhone?: string; pickupAt: string; detail: string }[];
   tasks: { id: string; title: string; body: string; link: string | null; createdAt: string }[];
-  upcoming: { id: string; memberName: string; pickupAt: string; destination: string; status: RideStatus; statusLabel: string; driverName: string | null; bookedBy: string }[];
+  upcoming: { id: string; memberName: string; pickupAt: string; destination: string; displayStatus: RideDisplayStatus; statusLabel: string; driverName: string | null; bookedBy: string }[];
 }
 
 const LABELS = { no_driver: 'No driver yet', not_at_pickup: 'Not at pickup', phone_log: 'Trip log by phone' };
@@ -81,7 +81,7 @@ function Inner() {
                       <td>{when(r.pickupAt)}</td>
                       <td>{r.destination.replace('Princes Street Church: ', '')}</td>
                       <td>
-                        <RideChip status={r.status} />
+                        <RideChip status={r.displayStatus} />
                       </td>
                       <td>{r.driverName ?? '—'}</td>
                       <td>{r.bookedBy}</td>

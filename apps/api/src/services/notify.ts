@@ -1,5 +1,6 @@
-import { and, asc, eq, inArray, lt, or, sql } from 'drizzle-orm';
-import { env } from '../config/env';
+import { and, asc, eq, inArray, lt, sql } from 'drizzle-orm';
+import { env, pushEnabled } from '../config/env';
+import { deliverPush } from './push';
 import { db, type Executor } from '../db/client';
 import { members, notifications, users } from '../db/schema';
 import { logger } from '../lib/logger';
@@ -22,7 +23,7 @@ export interface Message {
   rideId?: string | null;
 }
 
-type Channel = 'in_app' | 'email' | 'sms' | 'phone_task';
+type Channel = 'in_app' | 'email' | 'sms' | 'phone_task' | 'push';
 const activeUser = eq(users.status, 'active');
 
 /** In-app + email/SMS to specific logins. */
@@ -97,6 +98,10 @@ async function insert(tx: Executor, n: Message & { userId?: string; memberId?: s
     rideId: n.rideId ?? null,
     delivered: n.channel === 'in_app' || n.channel === 'phone_task',
   });
+  // Every in-app message to a login also becomes a phone/desktop alert (if alerts are configured).
+  if ((n.channel === 'in_app' || n.channel === 'phone_task') && n.userId && pushEnabled()) {
+    await tx.insert(notifications).values({ userId: n.userId, channel: 'push', kind: n.channel === 'phone_task' ? 'phone_task' : n.kind, title: n.title, body: '', link: n.link ?? null, rideId: n.rideId ?? null });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -142,16 +147,29 @@ export async function flushOutbox(limit = 50): Promise<number> {
   let sent = 0;
   try {
     const pending = await db
-      .select({ id: notifications.id, channel: notifications.channel, to: notifications.toAddress, title: notifications.title, body: notifications.body })
+      .select({
+        id: notifications.id,
+        channel: notifications.channel,
+        to: notifications.toAddress,
+        title: notifications.title,
+        body: notifications.body,
+        userId: notifications.userId,
+        kind: notifications.kind,
+        link: notifications.link,
+      })
       .from(notifications)
-      .where(and(eq(notifications.delivered, false), or(eq(notifications.channel, 'email'), eq(notifications.channel, 'sms')), lt(notifications.attempts, 5)))
+      .where(and(eq(notifications.delivered, false), inArray(notifications.channel, ['email', 'sms', 'push']), lt(notifications.attempts, 5)))
       .orderBy(asc(notifications.createdAt))
       .limit(limit);
     for (const n of pending) {
-      const channel = n.channel as 'email' | 'sms';
-      const sender = senderFor(channel);
       try {
-        if (sender) await sender.send(channel, n.to ?? '', n.title, n.body);
+        if (n.channel === 'push') {
+          if (n.userId) await deliverPush(n.userId, n.kind, n.link);
+        } else {
+          const channel = n.channel as 'email' | 'sms';
+          const sender = senderFor(channel);
+          if (sender) await sender.send(channel, n.to ?? '', n.title, n.body);
+        }
         await db.update(notifications).set({ delivered: true, attempts: sql`${notifications.attempts} + 1` }).where(eq(notifications.id, n.id));
         sent++;
       } catch (err) {

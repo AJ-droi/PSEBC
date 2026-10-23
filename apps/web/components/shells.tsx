@@ -8,6 +8,7 @@ import { fetcher } from '@/lib/api';
 import { homeFor, signOut, useMe, type Me } from '@/lib/session';
 import { Brand, Loading } from './ui';
 import { Bell } from './icons';
+import { AlertsPrompt, useMessageAlerts } from './alerts';
 
 /** Loads the signed-in user and checks the role before rendering a screen. The API re-checks every call. */
 export function RoleGate({ roles, children }: { roles: Role[]; children: (me: Me) => ReactNode }) {
@@ -32,7 +33,11 @@ export function RoleGate({ roles, children }: { roles: Role[]; children: (me: Me
 }
 
 function NotificationsLink() {
-  const { data } = useSWR<{ unread: number }>('/notifications', fetcher, { refreshInterval: 60_000 });
+  const { data } = useSWR<{ unread: number; notifications: { kind: string; readAt: string | null }[] }>('/notifications', fetcher, {
+    refreshInterval: 20_000,
+    refreshWhenHidden: true,
+  });
+  useMessageAlerts(data);
   const n = data?.unread ?? 0;
   return (
     <Link href="/notifications" className="icon-btn" aria-label={n ? `Messages, ${n} new` : 'Messages'} style={{ position: 'relative' }}>
@@ -72,6 +77,7 @@ export function MobileShell({ roles, children, top = true, label }: { roles: Rol
                 </div>
               </header>
             ) : null}
+            <AlertsPrompt inset />
             {children(me)}
           </>
         )}
@@ -87,9 +93,9 @@ const NAV: Record<string, { href: string; label: string; roles: Role[] }[]> = {
     { href: '/office/drivers', label: 'Drivers', roles: ['coordinator', 'admin'] },
     { href: '/office/reports', label: 'Reports', roles: ['admin'] },
     { href: '/office/users', label: 'Logins', roles: ['admin'] },
+    { href: '/safeguarding/incidents', label: 'Incidents', roles: ['safeguarding'] },
     { href: '/safeguarding', label: 'Sign-off', roles: ['safeguarding'] },
     { href: '/safeguarding/approvals', label: 'Driver approvals', roles: ['safeguarding'] },
-    { href: '/safeguarding/incidents', label: 'Incidents', roles: ['safeguarding'] },
     { href: '/office/reports', label: 'Reports', roles: ['safeguarding'] },
     { href: '/safeguarding/audit', label: 'Audit trail', roles: ['safeguarding'] },
   ],
@@ -143,6 +149,7 @@ export function DesktopShell({ roles, children }: { roles: Role[]; children: (me
                 </div>
               </header>
               <main className="d-main" id="main">
+                <AlertsPrompt />
                 {children(me)}
               </main>
             </>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { findEligibleDrivers, whyIneligible, type MatchDriver, type MatchMemberNeeds, type MatchRide } from './matching';
 import { canTransition, isCancellable } from './status';
+import { rideDisplayStatus } from './domain';
 
 const margaret: MatchMemberNeeds = {
   id: 'm1',
@@ -92,5 +93,14 @@ describe('ride status machine (PRD §8)', () => {
     const pickup = new Date('2026-11-08T09:45:00Z');
     expect(isCancellable('driver_found', pickup, new Date('2026-11-08T09:00:00Z'))).toBe(true);
     expect(isCancellable('driver_found', pickup, new Date('2026-11-08T09:50:00Z'))).toBe(false);
+  });
+});
+
+describe('display status', () => {
+  it('shows "incident" until the trip is signed off', () => {
+    expect(rideDisplayStatus('driver_found', new Date())).toBe('incident');
+    expect(rideDisplayStatus('invites_sent', '2026-11-08T10:00:00Z')).toBe('incident');
+    expect(rideDisplayStatus('signed_off', new Date())).toBe('signed_off');
+    expect(rideDisplayStatus('driver_found', null)).toBe('driver_found');
   });
 });

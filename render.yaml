@@ -30,5 +30,12 @@ services:
         value: console
       - key: NOTIFY_SMS_DRIVER
         value: console
+      # Phone alerts: generate once with `npx web-push generate-vapid-keys`
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        value: mailto:office@example.org
       - key: REPORTS_SHOW_MEMBER_NAMES
         value: 'false'

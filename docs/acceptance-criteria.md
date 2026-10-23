@@ -108,10 +108,18 @@ Legend: ✅ met · 🟡 met with a note · ⬜ not built (not a Must)
 | Works on iOS/Android phones and desktop | ✅ | Installable PWA (manifest, icons, offline page) + desktop office layouts |
 | Individual logins; MFA for admin and safeguarding | ✅ | TOTP |
 | Data encrypted in transit and at rest | ✅ | TLS; Neon encryption; health fields additionally AES-256-GCM |
-| Invite and confirmation within 5 minutes | 🟡 | In-app is instant; SMS/email leave within a minute once a provider is connected |
+| Invite and confirmation within 5 minutes | ✅ | In-app with a sound alert within 20 s while the app is open; phone alerts (Web Push) within seconds when it's closed, once VAPID keys are set. SMS/email leave within a minute once a provider is connected |
 | UK or EU hosting; no personal data on phones beyond the session | ✅ | Neon London + Render Frankfurt; service worker never caches API data and is cleared at sign-out |
 | Lone-working reminder with a tick before the first trip | ✅ | Required before a driver can accept. **Church to paste its approved guidance text** into `/guidance/lone-working` |
 | Zero budget | ✅ | Free tiers only (see deployment.md) |
+
+## Changes after the first review (23 Oct 2026)
+
+| Request | Status | Where / evidence |
+| --- | --- | --- |
+| A lift with an incident shows "Incident reported" to admin, office and the member instead of "Driver found"/"Finding a driver" | ✅ | `rides.incident_reported_at` set by a concern, a driver log "anything to report" or a member "didn't feel safe"; shown until sign-off. The report itself stays safeguarding-only. Test "Incident reported…" |
+| Safeguarding sees incidents first after signing in | ✅ | Lands on Incidents (open incidents first, "Review now"); Incidents is first in the nav |
+| Sound alert for new messages | ✅ | In-app chime + vibration; Web Push when closed (generic text only). Test "Phone alerts…" |
 
 ## Not in release 1 (as agreed in the PRD)
 

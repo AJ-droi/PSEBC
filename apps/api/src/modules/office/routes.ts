@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import { aliasedTable, and, asc, desc, eq, gt, gte, inArray, isNull, lt, sql } from 'drizzle-orm';
-import { RIDE_STATUS_LABELS } from '@psebc/shared';
 import { db } from '../../db/client';
 import { inviteCount, q, tripLogExists } from '../../db/sql';
 import { drivers, members, notifications, rides, users } from '../../db/schema';
 import { ah } from '../../lib/http';
 import { requireRole } from '../../middleware/auth';
+import { statusFields } from '../rides/views';
 
 export const officeRouter = Router();
 
@@ -68,6 +68,7 @@ officeRouter.get(
         pickupAt: rides.pickupAt,
         destination: rides.destination,
         status: rides.status,
+        incidentReportedAt: rides.incidentReportedAt,
         driverName: drivers.fullName,
         bookedByRole: rides.bookedByRole,
         bookedByName: bookedBy.fullName,
@@ -116,8 +117,7 @@ officeRouter.get(
         memberName: r.memberName,
         pickupAt: r.pickupAt,
         destination: r.destination,
-        status: r.status,
-        statusLabel: RIDE_STATUS_LABELS[r.status],
+        ...statusFields(r),
         driverName: r.driverName?.split(' ')[0] ?? null,
         bookedBy: r.bookedByRole === 'member' ? 'Member' : `Office${r.bookedByName ? ` (${r.bookedByName.split(' ')[0]})` : ''}`,
       })),

@@ -136,6 +136,23 @@ export const RIDE_STATUS_LABELS: Record<RideStatus, string> = {
   cancelled: 'Cancelled',
 };
 
+/**
+ * What screens show for a ride. An incident doesn't change where the ride is in the
+ * PRD §8 lifecycle (it still has to be completed, logged and signed off), but until
+ * safeguarding signs the trip off everyone should see that an incident was reported.
+ */
+export type RideDisplayStatus = RideStatus | 'incident';
+
+export const RIDE_DISPLAY_LABELS: Record<RideDisplayStatus, string> = {
+  ...RIDE_STATUS_LABELS,
+  incident: 'Incident reported',
+};
+
+export function rideDisplayStatus(status: RideStatus, incidentReportedAt: Date | string | null | undefined): RideDisplayStatus {
+  if (incidentReportedAt && status !== 'signed_off' && status !== 'cancelled') return 'incident';
+  return status;
+}
+
 export const DESTINATIONS = [
   'Princes Street Church: Sunday service',
   'Princes Street Church: coffee morning',

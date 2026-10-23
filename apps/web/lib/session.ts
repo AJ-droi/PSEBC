@@ -20,13 +20,17 @@ export function homeFor(role: Role): string {
     case 'driver':
       return '/driver';
     case 'safeguarding':
-      return '/safeguarding';
+      // Open incidents are the first thing the safeguarding lead sees.
+      return '/safeguarding/incidents';
     default:
       return '/office';
   }
 }
 
 export async function signOut() {
+  // Stop this device getting the next person's alerts, while we are still signed in.
+  const { disablePushAlerts } = await import('./alerts');
+  await disablePushAlerts();
   await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
   navigator.serviceWorker?.controller?.postMessage('logout');
   window.location.href = '/login';
