@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { count, eq } from 'drizzle-orm';
 import { fileURLToPath } from 'node:url';
+import { normaliseUkPhone } from '@psebc/shared';
 import { encryptJson } from '../lib/crypto';
 import { closeDb, db, withTx } from './client';
 import { migrate } from './migrate';
@@ -23,6 +24,8 @@ export async function seed(log: (m: string) => void = console.log) {
     return;
   }
 
+  /** Seed data goes in the same +44 form the forms produce. */
+  const uk = (n: string) => normaliseUkPhone(n)!;
   const inDays = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
 
   await withTx(async (tx) => {
@@ -36,15 +39,15 @@ export async function seed(log: (m: string) => void = console.log) {
           town: p.town,
           postcode: p.pc,
           findingNotes: 'Use the side door. Ring twice.',
-          phone: p.phone,
+          phone: uk(p.phone),
           contactMethod: p.contact,
           bookedBy: p.bookedBy,
           emergencyName: 'Ruth Evans',
           emergencyRelationship: 'Son or daughter',
-          emergencyPhone: '07700 900123',
+          emergencyPhone: uk('07700 900123'),
           hasRepresentative: true,
           representativeName: 'Ruth Evans',
-          representativePhone: '07700 900123',
+          representativePhone: uk('07700 900123'),
           representativeRole: 'Helps me with my arrangements',
           mobilityAids: p.aids,
           helpNeeded: p.help,
@@ -68,7 +71,7 @@ export async function seed(log: (m: string) => void = console.log) {
         .insert(drivers)
         .values({
           fullName: p.name,
-          phone: p.phone,
+          phone: uk(p.phone),
           email: p.email,
           postcode: p.pc,
           dbsNumber: '001234567890',
@@ -109,10 +112,10 @@ export async function seed(log: (m: string) => void = console.log) {
       { email: 'admin@psebc.example', fullName: 'Church Admin', role: 'admin', passwordHash },
       { email: 'mathias@psebc.example', fullName: 'Mathias', role: 'safeguarding', passwordHash },
       { email: 'grace@psebc.example', fullName: 'Grace', role: 'coordinator', passwordHash },
-      { email: 'margaret@psebc.example', fullName: 'Margaret Evans', role: 'member', passwordHash, memberId: margaret, phone: '07700 900456' },
-      { email: 'david@psebc.example', fullName: 'David Thomas', role: 'driver', passwordHash, driverId: david, phone: '07700 900789' },
-      { email: 'peter@psebc.example', fullName: 'Peter Morgan', role: 'driver', passwordHash, driverId: peter, phone: '07700 900790' },
-      { email: 'helen@psebc.example', fullName: 'Helen Price', role: 'driver', passwordHash, driverId: helen, phone: '07700 900791' },
+      { email: 'margaret@psebc.example', fullName: 'Margaret Evans', role: 'member', passwordHash, memberId: margaret, phone: uk('07700 900456') },
+      { email: 'david@psebc.example', fullName: 'David Thomas', role: 'driver', passwordHash, driverId: david, phone: uk('07700 900789') },
+      { email: 'peter@psebc.example', fullName: 'Peter Morgan', role: 'driver', passwordHash, driverId: peter, phone: uk('07700 900790') },
+      { email: 'helen@psebc.example', fullName: 'Helen Price', role: 'driver', passwordHash, driverId: helen, phone: uk('07700 900791') },
     ]);
   });
 

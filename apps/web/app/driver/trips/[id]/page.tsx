@@ -1,4 +1,5 @@
 'use client';
+import { formatUkPhone,telHref } from '@psebc/shared';
 import Link from 'next/link';
 import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
@@ -90,15 +91,15 @@ function Inner() {
           <strong style={{ fontSize: '1.125rem' }}>{r.pickupAddress}</strong>
           {m.findingNotes ? <p className="muted">{m.findingNotes}</p> : null}
           <div className="row">
-            <a className="btn btn-secondary sm grow" href={`tel:${m.phone.replace(/\s/g, '')}`}>
+            <a className="btn btn-secondary sm grow" href={telHref(m.phone)}>
               <Phone /> Call {m.preferredName}
             </a>
-            <a className="btn btn-secondary sm grow" href={`tel:${m.emergencyPhone.replace(/\s/g, '')}`}>
+            <a className="btn btn-secondary sm grow" href={telHref(m.emergencyPhone)}>
               <Phone /> Emergency contact
             </a>
           </div>
           <p className="small muted">
-            Emergency contact: {m.emergencyName} ({m.emergencyRelationship})
+            Emergency contact: {m.emergencyName} ({m.emergencyRelationship}) · {formatUkPhone(m.emergencyPhone)}
           </p>
           <p className="small muted">
             Going to {r.destination}

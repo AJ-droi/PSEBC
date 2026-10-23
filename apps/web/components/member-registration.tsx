@@ -129,7 +129,7 @@ export function MemberRegistration() {
               </div>
             </div>
             <TextArea label="Anything that helps the driver find them?" hint="Optional. Please don’t write key safe codes here." value={s.findingNotes} onChange={(e) => set('findingNotes', e.target.value)} rows={2} />
-            <TextField label="Phone number" type="tel" value={s.phone} onChange={(e) => set('phone', e.target.value)} error={fields.phone} />
+            <TextField label="Phone number" type="tel" hint="UK number, for example 07700 900123" inputMode="tel" autoComplete="tel" placeholder="07700 900123" value={s.phone} onChange={(e) => set('phone', e.target.value)} error={fields.phone} />
           </>
         ) : null}
         {showStep === 2 ? (
@@ -145,7 +145,7 @@ export function MemberRegistration() {
             <p className="lede" style={{ marginTop: -14 }}>Someone we can call if there’s a problem on a journey.</p>
             <TextField label="Their name" value={s.emergencyName} onChange={(e) => set('emergencyName', e.target.value)} error={fields.emergencyName} />
             <SelectField label="How are they related?" value={s.emergencyRelationship} onChange={(e) => set('emergencyRelationship', e.target.value)} options={RELATIONSHIPS.map((r) => ({ value: r, label: r }))} />
-            <TextField label="Their phone number" type="tel" value={s.emergencyPhone} onChange={(e) => set('emergencyPhone', e.target.value)} error={fields.emergencyPhone} />
+            <TextField label="Their phone number" type="tel" hint="UK number, for example 07700 900123" inputMode="tel" autoComplete="tel" placeholder="07700 900123" value={s.emergencyPhone} onChange={(e) => set('emergencyPhone', e.target.value)} error={fields.emergencyPhone} />
             <YesNo legend="Does someone help them manage their lifts?" name="rep" value={s.hasRepresentative} onChange={(v) => set('hasRepresentative', v)} />
             {s.hasRepresentative ? (
               <div className="panel">
@@ -155,7 +155,7 @@ export function MemberRegistration() {
                 {!s.representativeSameAsEmergency ? (
                   <>
                     <TextField label="Their name" value={s.representativeName} onChange={(e) => set('representativeName', e.target.value)} />
-                    <TextField label="Their phone" type="tel" value={s.representativePhone} onChange={(e) => set('representativePhone', e.target.value)} />
+                    <TextField label="Their phone" type="tel" hint="UK number, for example 07700 900123" inputMode="tel" autoComplete="tel" placeholder="07700 900123" value={s.representativePhone} onChange={(e) => set('representativePhone', e.target.value)} error={fields.representativePhone} />
                   </>
                 ) : null}
                 <SelectField label="What is their role?" value={s.representativeRole} onChange={(e) => set('representativeRole', e.target.value)} options={REPRESENTATIVE_ROLES.map((r) => ({ value: r, label: r }))} />

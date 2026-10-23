@@ -161,6 +161,19 @@ describe('PSEBC journey', () => {
     expect(row!.health_enc).not.toContain('memory');
   });
 
+  it('Phone numbers: UK numbers only, stored as +44 and used for texts', async () => {
+    const foreign = await admin.post('/api/members').send(memberPayload({ phone: '+234 803 123 4567' }));
+    expect(foreign.status).toBe(422);
+    expect(foreign.body.error.details.fields.phone).toMatch(/UK phone number/);
+    expect((await admin.post('/api/members').send(memberPayload({ emergencyPhone: '12345' }))).body.error.details.fields.emergencyPhone).toMatch(/UK/);
+
+    const ok = await admin.post('/api/members').send(memberPayload({ fullName: 'Phone Test', phone: '+44 (0)7700 900999', emergencyPhone: '01446 700111', consent: true }));
+    expect(ok.status).toBe(201);
+    const [row] = await query<{ phone: string; emergency_phone: string }>('SELECT phone, emergency_phone FROM members WHERE id = $1', [ok.body.id]);
+    expect(row).toEqual({ phone: '+447700900999', emergency_phone: '+441446700111' });
+
+  });
+
   it('PSEBC-7 / 1.7: updating needs with new health info requires fresh consent', async () => {
     const needs = { mobilityAids: ['walking_stick'], helpNeeded: ['door'], vehicleRequirement: 'any', notesForDriver: '', healthFlags: ['memory', 'diabetes'], unwellInstructions: 'Call Tom', consent: false };
     expect((await coordinator.put(`/api/members/${joanId}/needs`).send(needs)).status).toBe(400);
@@ -266,7 +279,7 @@ describe('PSEBC journey', () => {
   it('PSEBC-22 (4.2): after acceptance driver sees name, address, phone, emergency contact and consented health notes — and it is audited', async () => {
     const res = await david.get(`/api/rides/${rideId}`);
     expect(res.body.view).toBe('driver_trip');
-    expect(res.body.member).toMatchObject({ preferredName: 'Margaret', phone: '07700 900456', emergencyName: 'Ruth Evans' });
+    expect(res.body.member).toMatchObject({ preferredName: 'Margaret', phone: '+447700900456', emergencyName: 'Ruth Evans' });
     expect(res.body.ride.pickupAddress).toContain('12 Example Road');
     expect(res.body.member.healthNotes).toEqual(['Diabetes: may need a snack or drink']);
     const audit = await query(`SELECT 1 FROM audit_log WHERE action = 'member.view_needs' AND details->>'via' = 'driver_trip'`);
@@ -282,8 +295,9 @@ describe('PSEBC journey', () => {
     const task = await query(`SELECT 1 FROM notifications WHERE channel = 'phone_task' AND ride_id = $1`, [res.body.id]);
     expect(task.length).toBeGreaterThan(0); // Edna prefers the church office to call
 
-    const margaretRide = await query(`SELECT 1 FROM notifications WHERE channel = 'sms' AND ride_id = $1`, [rideId]);
+    const margaretRide = await query<{ to_address: string }>(`SELECT to_address FROM notifications WHERE channel = 'sms' AND member_id IS NOT NULL AND ride_id = $1`, [rideId]);
     expect(margaretRide.length).toBeGreaterThan(0); // Margaret prefers text
+    expect(margaretRide[0]!.to_address).toBe('+447700900456'); // texts go to the +44 form
   });
 
   it('PSEBC-19 / §8: a request no driver can take goes straight to the coordinator', async () => {
@@ -384,7 +398,7 @@ describe('PSEBC journey', () => {
     const text = JSON.stringify(res.body);
     expect(text).not.toContain('Margaret');
     expect(text).not.toContain('Example Road');
-    expect(text).not.toContain('07700 900456');
+    expect(text).not.toContain('+447700900456');
   });
 
   it('PSEBC-27 (6.1): ready for sign-off 72 hours after completion if a log is missing (missing log noted)', async () => {

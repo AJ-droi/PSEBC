@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import useSWR from 'swr';
-import { HELP_CAPS, VEHICLE_CAPS, labelList, type DriverStatus } from '@psebc/shared';
+import { HELP_CAPS, VEHICLE_CAPS, formatUkPhone, labelList, type DriverStatus } from '@psebc/shared';
 import { fetcher, post } from '@/lib/api';
 import { useSubmit } from '@/lib/form';
 import { date } from '@/lib/format';
@@ -84,7 +84,7 @@ function Decision({ id, onDone }: { id: string; onDone: () => void }) {
               {d.fullName}
             </h1>
             <p className="muted">
-              {d.postcode} · {d.phone}
+              {d.postcode} · {formatUkPhone(d.phone)}
             </p>
           </div>
         </div>

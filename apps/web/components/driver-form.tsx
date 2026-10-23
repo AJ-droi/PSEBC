@@ -81,7 +81,7 @@ export function DriverForm({ driverId, initial, status }: { driverId?: string; i
           <h2>1 · About the driver</h2>
           <div className="cols-2">
             <TextField label="Full name" value={v.fullName} onChange={(e) => set('fullName', e.target.value)} error={fields.fullName} />
-            <TextField label="Mobile" type="tel" value={v.phone} onChange={(e) => set('phone', e.target.value)} error={fields.phone} />
+            <TextField label="Mobile" type="tel" hint="UK number, for example 07700 900123" inputMode="tel" autoComplete="tel" placeholder="07700 900123" value={v.phone} onChange={(e) => set('phone', e.target.value)} error={fields.phone} />
             <TextField label="Email" type="email" value={v.email} onChange={(e) => set('email', e.target.value)} error={fields.email} />
             <TextField label="Home postcode" value={v.postcode} onChange={(e) => set('postcode', e.target.value.toUpperCase())} error={fields.postcode} />
           </div>

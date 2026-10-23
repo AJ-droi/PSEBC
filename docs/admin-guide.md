@@ -24,6 +24,11 @@ The first time they sign in, they scan a code; after that they type the 6-digit 
 
 To change needs later: open the member → **Update needs**. If health information changes, tick consent again.
 
+**Phone numbers** must be UK numbers (mobiles like 07700 900123 or landlines like 01446 700000). You can
+type them with or without spaces, or starting +44; the app stores them in one standard form and shows them
+the usual UK way. Numbers from other countries are refused, because texts and the "Call" buttons only work
+with UK numbers.
+
 ## Adding a volunteer driver
 
 1. **Drivers → Add a volunteer driver.** Fill in the four sections with the driver and upload their licence and insurance.

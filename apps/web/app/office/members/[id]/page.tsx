@@ -1,4 +1,5 @@
 'use client';
+import { formatUkPhone } from '@psebc/shared';
 import Link from 'next/link';
 import { Suspense, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
@@ -79,12 +80,12 @@ function Inner({ me }: { me: Me }) {
                 ['Called', m.preferredName],
                 ['Address', `${m.addressLine}, ${m.town} ${m.postcode}`],
                 ['Finding them', m.findingNotes || '—'],
-                ['Phone', m.phone],
+                ['Phone', formatUkPhone(m.phone)],
                 ['Texts', m.canReceiveSms ? 'Yes' : 'No'],
                 ['Contact by', CONTACT_METHODS[m.contactMethod as keyof typeof CONTACT_METHODS] ?? m.contactMethod],
                 ['Usually booked by', BOOKED_BY[m.bookedBy as keyof typeof BOOKED_BY] ?? m.bookedBy],
-                ['Emergency contact', `${m.emergencyName} (${m.emergencyRelationship}) · ${m.emergencyPhone}`],
-                ['Representative', m.hasRepresentative ? `${m.representativeName} · ${m.representativeRole} · ${m.representativePhone}` : 'None'],
+                ['Emergency contact', `${m.emergencyName} (${m.emergencyRelationship}) · ${formatUkPhone(m.emergencyPhone)}`],
+                ['Representative', m.hasRepresentative ? `${m.representativeName} · ${m.representativeRole} · ${formatUkPhone(m.representativePhone)}` : 'None'],
               ]}
             />
           </section>

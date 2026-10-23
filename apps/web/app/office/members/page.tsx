@@ -1,4 +1,5 @@
 'use client';
+import { formatUkPhone } from '@psebc/shared';
 import Link from 'next/link';
 import { useState } from 'react';
 import useSWR from 'swr';
@@ -62,7 +63,7 @@ function Inner() {
                     <td>
                       {m.town} {m.postcode}
                     </td>
-                    <td>{m.phone}</td>
+                    <td>{formatUkPhone(m.phone)}</td>
                     <td>{m.consentGiven ? <span className="chip chip-approved">Recorded</span> : <span className="chip chip-pending">Needed</span>}</td>
                     <td>{m.status === 'active' ? 'Active' : <span className="chip chip-closed">Closed</span>}</td>
                   </tr>

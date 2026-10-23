@@ -1,4 +1,5 @@
 'use client';
+import { formatUkPhone } from '@psebc/shared';
 import Link from 'next/link';
 import { Suspense, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
@@ -68,7 +69,7 @@ function Inner() {
             status={d.status}
             initial={{
               fullName: d.fullName,
-              phone: d.phone,
+              phone: formatUkPhone(d.phone),
               email: d.email,
               postcode: d.postcode,
               dbsNumber: d.dbsNumber,

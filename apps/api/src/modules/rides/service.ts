@@ -4,6 +4,7 @@ import {
   DECLINE_REASONS,
   RULES,
   assertTransition,
+  formatUkPhone,
   isCancellable,
   type CancelPart,
   type CancelReason,
@@ -373,7 +374,7 @@ export async function submitMemberLog(
       await notifyRole(tx, ['coordinator'], {
         kind: 'callback',
         title: `Please call ${m?.preferredName ?? 'a member'}`,
-        body: `${m?.fullName ?? 'A member'} asked for a call back after the lift on ${formatWhen(ride.pickupAt)}. Phone: ${m?.phone ?? ''}`,
+        body: `${m?.fullName ?? 'A member'} asked for a call back after the lift on ${formatWhen(ride.pickupAt)}. Phone: ${formatUkPhone(m?.phone)}`,
         link: `/office/members/${ride.memberId}`,
         rideId,
       });

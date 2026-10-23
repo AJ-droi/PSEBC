@@ -1,4 +1,5 @@
 'use client';
+import { formatUkPhone } from '@psebc/shared';
 import useSWR from 'swr';
 import { CONTACT_METHODS, HEALTH_FLAGS, HELP_NEEDED, MOBILITY_AIDS, VEHICLE_REQUIREMENTS, labelList } from '@psebc/shared';
 import { RoleGate } from '@/components/shells';
@@ -32,9 +33,9 @@ function Inner({ id }: { id: string }) {
               ['Name', m.fullName],
               ['Called', m.preferredName],
               ['Address', `${m.addressLine}, ${m.town} ${m.postcode}`],
-              ['Phone', m.phone],
+              ['Phone', formatUkPhone(m.phone)],
               ['We contact you by', CONTACT_METHODS[m.contactMethod as keyof typeof CONTACT_METHODS] ?? m.contactMethod],
-              ['Emergency contact', `${m.emergencyName} (${m.emergencyRelationship}) ${m.emergencyPhone}`],
+              ['Emergency contact', `${m.emergencyName} (${m.emergencyRelationship}) ${formatUkPhone(m.emergencyPhone)}`],
             ]}
           />
         </div>
@@ -48,7 +49,7 @@ function Inner({ id }: { id: string }) {
           {m.unwellInstructions ? <p className="muted">If unwell: {m.unwellInstructions}</p> : null}
           <p className="small muted">{m.consentGiven ? 'You agreed to share these with your driver for each lift.' : 'Consent has not been recorded, so lifts can’t be booked yet.'}</p>
         </div>
-        <p className="muted">To change anything, or to stop sharing your health notes, please phone the church office{phone ? ` on ${phone}` : ''}.</p>
+        <p className="muted">To change anything, or to stop sharing your health notes, please phone the church office{phone ? ` on ${formatUkPhone(phone)}` : ''}.</p>
         <button type="button" className="btn btn-secondary block" onClick={signOut}>
           Sign out
         </button>

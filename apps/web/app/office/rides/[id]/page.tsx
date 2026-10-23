@@ -1,4 +1,5 @@
 'use client';
+import { formatUkPhone } from '@psebc/shared';
 import Link from 'next/link';
 import { Suspense, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
@@ -65,7 +66,7 @@ function Inner() {
                 ['Lift home', r.returnNeeded && r.returnAt ? time(r.returnAt) : r.returnCancelled ? 'Cancelled' : 'Not needed'],
                 ['With', r.companion ? 'A carer or companion' : 'Travelling alone'],
                 ['Booked by', r.bookedByRole === 'member' ? 'Member (in the app)' : 'Church office'],
-                ['Phone', data.member.phone ?? '—'],
+                ['Phone', data.member.phone ? formatUkPhone(data.member.phone) : '—'],
                 ...(r.needsNote ? ([['This time', r.needsNote]] as [string, string][]) : []),
                 ...(r.cancelReason ? ([['Cancelled', CANCEL_REASONS[r.cancelReason as CancelReason] ?? r.cancelReason]] as [string, string][]) : []),
                 ...(r.notAtPickupAt ? ([['Not at pickup', time(r.notAtPickupAt)]] as [string, string][]) : []),

@@ -1,4 +1,5 @@
 'use client';
+import { telHref } from '@psebc/shared';
 import Link from 'next/link';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -113,7 +114,7 @@ function Inner() {
                 </span>
                 <span className="small">{a.detail}</span>
                 <div className="row">
-                  <a className="btn btn-secondary sm" href={`tel:${a.phone.replace(/\s/g, '')}`}>
+                  <a className="btn btn-secondary sm" href={telHref(a.phone)}>
                     Call {a.memberName.split(' ')[0]}
                   </a>
                   {a.type === 'no_driver' ? (
@@ -130,7 +131,7 @@ function Inner() {
                     </button>
                   ) : null}
                   {a.type === 'not_at_pickup' && a.emergencyPhone ? (
-                    <a className="btn btn-secondary sm" href={`tel:${a.emergencyPhone.replace(/\s/g, '')}`}>
+                    <a className="btn btn-secondary sm" href={telHref(a.emergencyPhone)}>
                       Call emergency contact
                     </a>
                   ) : null}

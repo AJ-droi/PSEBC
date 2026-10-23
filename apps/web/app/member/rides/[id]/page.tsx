@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 import useSWR from 'swr';
-import { CANCEL_REASONS, type CancelReason } from '@psebc/shared';
+import { CANCEL_REASONS, type CancelReason, formatUkPhone, telHref } from '@psebc/shared';
 import { RoleGate } from '@/components/shells';
 import { BackBar, ErrorBox, Loading, RideChip, Tags } from '@/components/ui';
 import { Check, Phone } from '@/components/icons';
@@ -29,7 +29,7 @@ function RideStatus() {
   if (!data) return <Loading />;
   const r = data.ride;
   const callOffice = phone ? (
-    <a className="btn btn-secondary block" href={`tel:${phone.replace(/\s/g, '')}`}>
+    <a className="btn btn-secondary block" href={telHref(phone)}>
       <Phone /> Call the church office
     </a>
   ) : null;
@@ -186,7 +186,7 @@ function IncidentNotice({ phone }: { phone: string }) {
   return (
     <div className="alert" role="status">
       <strong>An incident has been reported on this lift</strong>
-      <p>Our safeguarding lead has been told and may contact you. If you need help now, please phone the church office{phone ? ` on ${phone}` : ''}.</p>
+      <p>Our safeguarding lead has been told and may contact you. If you need help now, please phone the church office{phone ? ` on ${formatUkPhone(phone)}` : ''}.</p>
     </div>
   );
 }

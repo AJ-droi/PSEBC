@@ -1,4 +1,5 @@
 'use client';
+import { telHref } from '@psebc/shared';
 import Link from 'next/link';
 import useSWR from 'swr';
 import { MobileShell } from '@/components/shells';
@@ -61,7 +62,7 @@ function Home({ name }: { name: string }) {
       ) : null}
 
       {phone ? (
-        <a className="btn btn-secondary block" href={`tel:${phone.replace(/\s/g, '')}`}>
+        <a className="btn btn-secondary block" href={telHref(phone)}>
           <Phone /> Call the church office
         </a>
       ) : null}

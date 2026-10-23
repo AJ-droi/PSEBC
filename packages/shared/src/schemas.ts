@@ -17,18 +17,29 @@ import {
   VEHICLE_REQUIREMENTS,
   YES_NO_UNSURE,
 } from './domain';
+import { isUkPhone, normaliseUkPhone } from './phone';
 
 const keys = <T extends Record<string, string>>(m: T) => Object.keys(m) as [keyof T & string, ...(keyof T & string)[]];
 const enumOf = <T extends Record<string, string>>(m: T) => z.enum(keys(m));
 
 const trimmed = (max = 200) => z.string().trim().max(max);
 const required = (label: string, max = 200) => z.string().trim().min(1, `${label} is required`).max(max);
+const UK_PHONE_MESSAGE = 'Enter a UK phone number, like 07700 900123 or 01446 700000';
+/** UK numbers only; stored as +44… (see phone.ts). */
 const phone = z
   .string()
   .trim()
-  .min(6, 'Enter a phone number')
+  .min(1, 'Enter a phone number')
   .max(30)
-  .regex(/^[+0-9 ()-]+$/, 'Use numbers only');
+  .refine(isUkPhone, UK_PHONE_MESSAGE)
+  .transform((v) => normaliseUkPhone(v)!);
+/** Same, but may be left blank. */
+const optionalPhone = z
+  .string()
+  .trim()
+  .max(30)
+  .refine((v) => v === '' || isUkPhone(v), UK_PHONE_MESSAGE)
+  .transform((v) => (v === '' ? '' : normaliseUkPhone(v)!));
 const ukPostcode = z
   .string()
   .trim()
@@ -81,7 +92,7 @@ export const memberEmergencySchema = z.object({
   hasRepresentative: z.boolean(),
   representativeSameAsEmergency: z.boolean().default(true),
   representativeName: trimmed().optional().default(''),
-  representativePhone: z.string().trim().max(30).optional().default(''),
+  representativePhone: optionalPhone.optional().default(''),
   representativeRole: trimmed(80).optional().default(''),
 });
 
