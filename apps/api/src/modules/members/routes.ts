@@ -1,6 +1,8 @@
 import { Router } from 'express';
+import { and, eq, sql } from 'drizzle-orm';
 import { memberCreateSchema, memberDetailsUpdateSchema, memberNeedsUpdateSchema, closeAccountSchema } from '@psebc/shared';
-import { withTx, query } from '../../db/pool';
+import { withTx } from '../../db/client';
+import { members } from '../../db/schema';
 import { ah, parse, uuidParam } from '../../lib/http';
 import { forbidden, notFound, badRequest } from '../../lib/errors';
 import { encryptJson } from '../../lib/crypto';
@@ -17,19 +19,7 @@ membersRouter.get(
   '/',
   requireRole('coordinator', 'admin', 'safeguarding'),
   ah(async (req, res) => {
-    const rows = await searchMembers(String(req.query.q ?? ''));
-    res.json({
-      members: rows.map((r) => ({
-        id: r.id,
-        fullName: r.full_name,
-        preferredName: r.preferred_name,
-        town: r.town,
-        postcode: r.postcode,
-        phone: r.phone,
-        consentGiven: r.consent_given,
-        status: r.status,
-      })),
-    });
+    res.json({ members: await searchMembers(String(req.query.q ?? '')) });
   }),
 );
 
@@ -40,56 +30,47 @@ membersRouter.post(
   ah(async (req, res) => {
     const input = parse(memberCreateSchema, req.body);
     const user = currentUser(req);
-    const consentAt = input.consent ? new Date() : null;
-    const member = await withTx(async (db) => {
-      const [row] = await query<{ id: string }>(
-        `INSERT INTO members (
-           full_name, preferred_name, address_line, town, postcode, finding_notes, phone,
-           can_receive_sms, contact_method, booked_by,
-           emergency_name, emergency_relationship, emergency_phone,
-           has_representative, representative_name, representative_phone, representative_role,
-           mobility_aids, help_needed, vehicle_requirement, notes_for_driver,
-           health_enc, consent_given, consent_given_by, consent_recorded_at, consent_recorded_by, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
-         RETURNING id`,
-        [
-          input.fullName,
-          input.preferredName,
-          input.addressLine,
-          input.town,
-          input.postcode,
-          input.findingNotes,
-          input.phone,
-          input.canReceiveSms,
-          input.contactMethod,
-          input.bookedBy,
-          input.emergencyName,
-          input.emergencyRelationship,
-          input.emergencyPhone,
-          input.hasRepresentative,
-          input.hasRepresentative && input.representativeSameAsEmergency ? input.emergencyName : input.representativeName,
-          input.hasRepresentative && input.representativeSameAsEmergency ? input.emergencyPhone : input.representativePhone,
-          input.hasRepresentative ? input.representativeRole : '',
-          input.mobilityAids,
-          input.helpNeeded,
-          input.vehicleRequirement,
-          input.notesForDriver,
-          encryptJson({ flags: input.healthFlags, unwellInstructions: input.unwellInstructions }),
-          input.consent,
-          input.consent ? input.consentGivenBy : null,
-          consentAt,
-          input.consent ? user.id : null,
-          user.id,
-        ],
-        db,
-      );
-      await audit(actorFrom(req), { action: 'member.create', entityType: 'member', entityId: row!.id, details: { consent: input.consent } }, db);
+    const sameRep = input.hasRepresentative && input.representativeSameAsEmergency;
+    const id = await withTx(async (tx) => {
+      const [row] = await tx
+        .insert(members)
+        .values({
+          fullName: input.fullName,
+          preferredName: input.preferredName,
+          addressLine: input.addressLine,
+          town: input.town,
+          postcode: input.postcode,
+          findingNotes: input.findingNotes,
+          phone: input.phone,
+          canReceiveSms: input.canReceiveSms,
+          contactMethod: input.contactMethod,
+          bookedBy: input.bookedBy,
+          emergencyName: input.emergencyName,
+          emergencyRelationship: input.emergencyRelationship,
+          emergencyPhone: input.emergencyPhone,
+          hasRepresentative: input.hasRepresentative,
+          representativeName: sameRep ? input.emergencyName : input.representativeName,
+          representativePhone: sameRep ? input.emergencyPhone : input.representativePhone,
+          representativeRole: input.hasRepresentative ? input.representativeRole : '',
+          mobilityAids: input.mobilityAids,
+          helpNeeded: input.helpNeeded,
+          vehicleRequirement: input.vehicleRequirement,
+          notesForDriver: input.notesForDriver,
+          healthEnc: encryptJson({ flags: input.healthFlags, unwellInstructions: input.unwellInstructions }),
+          consentGiven: input.consent,
+          consentGivenBy: input.consent ? input.consentGivenBy : null,
+          consentRecordedAt: input.consent ? new Date() : null,
+          consentRecordedBy: input.consent ? user.id : null,
+          createdBy: user.id,
+        })
+        .returning({ id: members.id });
+      await audit(actorFrom(req), { action: 'member.create', entityType: 'member', entityId: row!.id, details: { consent: input.consent } }, tx);
       if (input.consent) {
-        await audit(actorFrom(req), { action: 'member.consent_recorded', entityType: 'member', entityId: row!.id, details: { by: input.consentGivenBy } }, db);
+        await audit(actorFrom(req), { action: 'member.consent_recorded', entityType: 'member', entityId: row!.id, details: { by: input.consentGivenBy } }, tx);
       }
-      return row!;
+      return row!.id;
     });
-    res.status(201).json({ id: member.id });
+    res.status(201).json({ id });
   }),
 );
 
@@ -110,45 +91,23 @@ membersRouter.get(
   }),
 );
 
-/** Contact details (not needs) — office only. */
+/** Contact details (not needs) — office only. Zod has already limited the keys to editable fields. */
 membersRouter.patch(
   '/:id',
   requireRole('admin', 'coordinator'),
   ah(async (req, res) => {
     const id = uuidParam(req);
     const input = parse(memberDetailsUpdateSchema, req.body);
-    const columns: Record<string, string> = {
-      fullName: 'full_name',
-      preferredName: 'preferred_name',
-      addressLine: 'address_line',
-      town: 'town',
-      postcode: 'postcode',
-      findingNotes: 'finding_notes',
-      phone: 'phone',
-      canReceiveSms: 'can_receive_sms',
-      contactMethod: 'contact_method',
-      bookedBy: 'booked_by',
-      emergencyName: 'emergency_name',
-      emergencyRelationship: 'emergency_relationship',
-      emergencyPhone: 'emergency_phone',
-      hasRepresentative: 'has_representative',
-      representativeName: 'representative_name',
-      representativePhone: 'representative_phone',
-      representativeRole: 'representative_role',
-    };
-    const sets: string[] = [];
-    const values: unknown[] = [id];
-    for (const [k, v] of Object.entries(input)) {
-      const col = columns[k];
-      if (!col || v === undefined) continue;
-      values.push(v);
-      sets.push(`${col} = $${values.length}`);
-    }
-    if (sets.length === 0) throw badRequest('Nothing to change');
-    await withTx(async (db) => {
-      const r = await db.query(`UPDATE members SET ${sets.join(', ')}, updated_at = now() WHERE id = $1 AND status = 'active'`, values);
-      if (r.rowCount === 0) throw notFound('Member');
-      await audit(actorFrom(req), { action: 'member.update_details', entityType: 'member', entityId: id, details: { fields: Object.keys(input) } }, db);
+    const changes = Object.fromEntries(Object.entries(input).filter(([k, v]) => v !== undefined && k !== 'representativeSameAsEmergency'));
+    if (Object.keys(changes).length === 0) throw badRequest('Nothing to change');
+    await withTx(async (tx) => {
+      const updated = await tx
+        .update(members)
+        .set({ ...changes, updatedAt: sql`now()` })
+        .where(and(eq(members.id, id), eq(members.status, 'active')))
+        .returning({ id: members.id });
+      if (updated.length === 0) throw notFound('Member');
+      await audit(actorFrom(req), { action: 'member.update_details', entityType: 'member', entityId: id, details: { fields: Object.keys(changes) } }, tx);
     });
     res.json({ ok: true });
   }),
@@ -165,35 +124,29 @@ membersRouter.put(
     const id = uuidParam(req);
     const input = parse(memberNeedsUpdateSchema, req.body);
     const user = currentUser(req);
-    await withTx(async (db) => {
-      const m = await getMember(id, db);
+    await withTx(async (tx) => {
+      const m = await getMember(id, tx);
       if (!m || m.status !== 'active') throw notFound('Member');
       const before = health(m);
       const healthChanged =
-        JSON.stringify([...before.flags].sort()) !== JSON.stringify([...input.healthFlags].sort()) ||
-        before.unwellInstructions !== input.unwellInstructions;
-      if (healthChanged && !input.consent) {
-        throw badRequest('New health information needs fresh consent before it can be saved');
-      }
-      await db.query(
-        `UPDATE members SET mobility_aids = $2, help_needed = $3, vehicle_requirement = $4, notes_for_driver = $5,
-                health_enc = $6, consent_given = $7, consent_given_by = $8,
-                consent_recorded_at = CASE WHEN $7 THEN now() ELSE NULL END,
-                consent_recorded_by = CASE WHEN $7 THEN $9::uuid ELSE NULL END,
-                needs_updated_at = now(), updated_at = now()
-          WHERE id = $1`,
-        [
-          id,
-          input.mobilityAids,
-          input.helpNeeded,
-          input.vehicleRequirement,
-          input.notesForDriver,
-          encryptJson({ flags: input.healthFlags, unwellInstructions: input.unwellInstructions }),
-          input.consent,
-          input.consent ? input.consentGivenBy : null,
-          user.id,
-        ],
-      );
+        JSON.stringify([...before.flags].sort()) !== JSON.stringify([...input.healthFlags].sort()) || before.unwellInstructions !== input.unwellInstructions;
+      if (healthChanged && !input.consent) throw badRequest('New health information needs fresh consent before it can be saved');
+      await tx
+        .update(members)
+        .set({
+          mobilityAids: input.mobilityAids,
+          helpNeeded: input.helpNeeded,
+          vehicleRequirement: input.vehicleRequirement,
+          notesForDriver: input.notesForDriver,
+          healthEnc: encryptJson({ flags: input.healthFlags, unwellInstructions: input.unwellInstructions }),
+          consentGiven: input.consent,
+          consentGivenBy: input.consent ? input.consentGivenBy : null,
+          consentRecordedAt: input.consent ? new Date() : null,
+          consentRecordedBy: input.consent ? user.id : null,
+          needsUpdatedAt: sql`now()`,
+          updatedAt: sql`now()`,
+        })
+        .where(eq(members.id, id));
       await audit(
         actorFrom(req),
         {
@@ -202,7 +155,7 @@ membersRouter.put(
           entityId: id,
           details: { healthChanged, consent: input.consent, mobilityAids: input.mobilityAids, helpNeeded: input.helpNeeded, vehicleRequirement: input.vehicleRequirement },
         },
-        db,
+        tx,
       );
     });
     res.json({ ok: true });

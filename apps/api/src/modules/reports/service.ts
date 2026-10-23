@@ -1,11 +1,22 @@
+import { and, avg, count, countDistinct, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql, type SQL } from 'drizzle-orm';
 import { DECLINE_REASONS, INELIGIBLE_LABELS } from '@psebc/shared';
-import { query } from '../../db/pool';
+import { db } from '../../db/client';
+import { q } from '../../db/sql';
+import { auditLog, concerns, drivers, members, rideInvites, rides, tripLogs } from '../../db/schema';
 import { env } from '../../config/env';
 
 /**
  * 7.1 Monthly reports dashboard (CR-01). Counts only — never health information.
  * Per-member names are behind REPORTS_SHOW_MEMBER_NAMES until the DPIA covers them (task 8.12).
  */
+
+const DONE = ['completed', 'logged', 'signed_off'] as const;
+
+async function countRides(where: SQL | undefined): Promise<number> {
+  const [r] = await db.select({ n: count() }).from(rides).where(where);
+  return r?.n ?? 0;
+}
+
 export async function monthlyReport(month: string) {
   const start = new Date(`${month}-01T00:00:00Z`);
   const end = new Date(start);
@@ -13,123 +24,128 @@ export async function monthlyReport(month: string) {
   const prevStart = new Date(start);
   prevStart.setUTCMonth(prevStart.getUTCMonth() - 1);
 
-  const [s] = await query<{
-    completed: number;
-    prev_completed: number;
-    requested: number;
-    cancelled: number;
-    no_driver: number;
-    concerns: number;
-    concerns_reviewed: number;
-    avg_rating: number | null;
-    ratings: number;
-    members_used: number;
-    signed_off_7d: number;
-    matched_before_pickup: number;
-    approved_at_accept: number;
-    concerns_notified_24h: number;
-  }>(
-    `WITH month_rides AS (SELECT * FROM rides WHERE pickup_at >= $1 AND pickup_at < $2)
-     SELECT
-       (SELECT count(*) FROM month_rides WHERE status IN ('completed','logged','signed_off')) AS completed,
-       (SELECT count(*) FROM rides WHERE pickup_at >= $3 AND pickup_at < $1 AND status IN ('completed','logged','signed_off')) AS prev_completed,
-       (SELECT count(*) FROM month_rides WHERE rebooked_from_id IS NULL) AS requested,
-       (SELECT count(*) FROM month_rides WHERE status = 'cancelled' AND cancel_reason <> 'no_driver') AS cancelled,
-       (SELECT count(*) FROM month_rides WHERE (status = 'cancelled' AND cancel_reason = 'no_driver') OR (status IN ('unmatched','invites_sent') AND pickup_at < now())) AS no_driver,
-       (SELECT count(*) FROM concerns c JOIN month_rides r ON r.id = c.ride_id) AS concerns,
-       (SELECT count(*) FROM concerns c JOIN month_rides r ON r.id = c.ride_id WHERE c.status = 'reviewed') AS concerns_reviewed,
-       (SELECT round(avg(l.rating)::numeric, 1) FROM trip_logs l JOIN month_rides r ON r.id = l.ride_id WHERE l.rating IS NOT NULL) AS avg_rating,
-       (SELECT count(*) FROM trip_logs l JOIN month_rides r ON r.id = l.ride_id WHERE l.rating IS NOT NULL) AS ratings,
-       (SELECT count(DISTINCT member_id) FROM month_rides WHERE status IN ('completed','logged','signed_off')) AS members_used,
-       (SELECT count(*) FROM month_rides WHERE status = 'signed_off' AND signed_off_at <= completed_at + interval '7 days') AS signed_off_7d,
-       (SELECT count(*) FROM month_rides WHERE accepted_at IS NOT NULL AND accepted_at < pickup_at) AS matched_before_pickup,
-       (SELECT count(*) FROM month_rides r JOIN drivers d ON d.id = r.driver_id WHERE r.status IN ('completed','logged','signed_off')) AS approved_at_accept,
-       (SELECT count(*) FROM concerns c JOIN month_rides r ON r.id = c.ride_id WHERE c.notified_at <= c.created_at + interval '24 hours') AS concerns_notified_24h`,
-    [start, end, prevStart],
-  );
+  const inMonth = and(gte(rides.pickupAt, start), lt(rides.pickupAt, end));
+  const done = inArray(rides.status, [...DONE]);
 
-  const byWeek = await query<{ week: Date; trips: number }>(
-    `SELECT date_trunc('week', pickup_at) AS week, count(*) AS trips
-       FROM rides WHERE pickup_at >= $1 AND pickup_at < $2 AND status IN ('completed','logged','signed_off')
-      GROUP BY 1 ORDER BY 1`,
-    [start, end],
+  const completed = await countRides(and(inMonth, done));
+  const prevCompleted = await countRides(and(gte(rides.pickupAt, prevStart), lt(rides.pickupAt, start), done));
+  const requested = await countRides(and(inMonth, isNull(rides.rebookedFromId)));
+  const cancelled = await countRides(and(inMonth, eq(rides.status, 'cancelled'), ne(rides.cancelReason, 'no_driver')));
+  const noDriver = await countRides(
+    and(inMonth, or(and(eq(rides.status, 'cancelled'), eq(rides.cancelReason, 'no_driver')), and(inArray(rides.status, ['unmatched', 'invites_sent']), lt(rides.pickupAt, new Date())))),
   );
+  const signedOff7d = await countRides(and(inMonth, eq(rides.status, 'signed_off'), lte(rides.signedOffAt, sql`${rides.completedAt} + interval '7 days'`)));
+  const matchedBeforePickup = await countRides(and(inMonth, isNotNull(rides.acceptedAt), lt(rides.acceptedAt, rides.pickupAt)));
 
-  // Why no driver was found: decline reasons on rides that never got a driver, plus "no eligible driver" from matching.
-  const declineReasons = await query<{ reason: string; n: number }>(
-    `SELECT i.decline_reason AS reason, count(*) AS n
-       FROM ride_invites i JOIN rides r ON r.id = i.ride_id
-      WHERE r.pickup_at >= $1 AND r.pickup_at < $2 AND i.status = 'declined' AND r.driver_id IS NULL
-        AND (r.status IN ('unmatched','cancelled','invites_sent'))
-      GROUP BY 1 ORDER BY n DESC`,
-    [start, end],
-  );
-  const ineligible = await query<{ reason: string; n: number }>(
-    `SELECT x->>'reason' AS reason, count(*) AS n
-       FROM audit_log a JOIN rides r ON r.id::text = a.entity_id,
-            jsonb_array_elements(a.details->'rejected') x
-      WHERE a.action = 'ride.match' AND (a.details->>'status') = 'unmatched' AND (a.details->>'eligible')::int = 0
-        AND r.pickup_at >= $1 AND r.pickup_at < $2 AND r.driver_id IS NULL
-        AND x->>'reason' IN ('vehicle_unsuitable', 'cannot_give_help', 'busy')
-      GROUP BY 1 ORDER BY n DESC`,
-    [start, end],
-  );
+  const [c] = await db
+    .select({
+      total: count(),
+      reviewed: sql<number>`count(*) FILTER (WHERE ${concerns.status} = 'reviewed')`.mapWith(Number),
+      notified24h: sql<number>`count(*) FILTER (WHERE ${concerns.notifiedAt} <= ${concerns.createdAt} + interval '24 hours')`.mapWith(Number),
+    })
+    .from(concerns)
+    .innerJoin(rides, eq(rides.id, concerns.rideId))
+    .where(inMonth);
 
-  const workload = await query<{ name: string; trips: number; declined: number }>(
-    `SELECT d.full_name AS name,
-            (SELECT count(*) FROM rides r WHERE r.driver_id = d.id AND r.pickup_at >= $1 AND r.pickup_at < $2 AND r.status IN ('completed','logged','signed_off')) AS trips,
-            (SELECT count(*) FROM ride_invites i JOIN rides r ON r.id = i.ride_id WHERE i.driver_id = d.id AND i.status = 'declined' AND r.pickup_at >= $1 AND r.pickup_at < $2) AS declined
-       FROM drivers d WHERE d.status IN ('approved','expired','closed','pending')
-      ORDER BY trips DESC, name`,
-    [start, end],
-  );
+  const [ratings] = await db
+    .select({ avg: avg(tripLogs.rating).mapWith(Number), n: count(tripLogs.rating) })
+    .from(tripLogs)
+    .innerJoin(rides, eq(rides.id, tripLogs.rideId))
+    .where(and(inMonth, isNotNull(tripLogs.rating)));
 
-  const memberUsage = await query<{ name: string; trips: number; usual: string }>(
-    `SELECT m.preferred_name AS name, count(*) AS trips, mode() WITHIN GROUP (ORDER BY r.destination) AS usual
-       FROM rides r JOIN members m ON m.id = r.member_id
-      WHERE r.pickup_at >= $1 AND r.pickup_at < $2 AND r.status IN ('completed','logged','signed_off')
-      GROUP BY m.id, m.preferred_name ORDER BY trips DESC LIMIT 10`,
-    [start, end],
-  );
+  const [usage] = await db.select({ n: countDistinct(rides.memberId) }).from(rides).where(and(inMonth, done));
+  // Every completed ride had an approved driver at acceptance (enforced at accept time).
+  const [approvedAtAccept] = await db.select({ n: count() }).from(rides).innerJoin(drivers, eq(drivers.id, rides.driverId)).where(and(inMonth, done));
 
-  const [expiring] = await query<{ n: number }>(
-    `SELECT count(*) AS n FROM drivers WHERE status = 'approved' AND LEAST(approved_until, dbs_renewal_date, insurance_expiry) <= (current_date + interval '30 days')`,
-  );
+  const week = sql<Date>`date_trunc('week', ${rides.pickupAt})`;
+  const byWeek = await db.select({ week, trips: count() }).from(rides).where(and(inMonth, done)).groupBy(week).orderBy(week);
+
+  // Why no driver was found: decline reasons on rides that never got a driver…
+  const declineReasons = await db
+    .select({ reason: rideInvites.declineReason, n: count() })
+    .from(rideInvites)
+    .innerJoin(rides, eq(rides.id, rideInvites.rideId))
+    .where(and(inMonth, eq(rideInvites.status, 'declined'), isNull(rides.driverId), inArray(rides.status, ['unmatched', 'cancelled', 'invites_sent'])))
+    .groupBy(rideInvites.declineReason)
+    .orderBy(desc(count()));
+  // …plus the matching rules that ruled drivers out when nobody was eligible (from the audit trail).
+  const reason = sql<string>`x->>'reason'`;
+  const ineligible = await db
+    .select({ reason, n: count() })
+    .from(auditLog)
+    .innerJoin(rides, sql`${rides.id}::text = ${auditLog.entityId}`)
+    .innerJoin(sql`jsonb_array_elements(${auditLog.details}->'rejected') AS x`, sql`true`)
+    .where(
+      and(
+        eq(auditLog.action, 'ride.match'),
+        sql`${auditLog.details}->>'status' = 'unmatched'`,
+        sql`(${auditLog.details}->>'eligible')::int = 0`,
+        inMonth,
+        isNull(rides.driverId),
+        sql`${reason} IN ('vehicle_unsuitable', 'cannot_give_help', 'busy')`,
+      ),
+    )
+    .groupBy(reason)
+    .orderBy(desc(count()));
+
+  // Driver workload — not a ranking (sponsor decision); first names only.
+  const workload = await db
+    .select({
+      name: drivers.fullName,
+      trips: sql<number>`(SELECT count(*) FROM ${rides} WHERE ${q(rides.driverId)} = ${q(drivers.id)} AND ${q(rides.pickupAt)} >= ${start} AND ${q(rides.pickupAt)} < ${end} AND ${q(rides.status)} IN ('completed','logged','signed_off'))`.mapWith(Number),
+      declined: sql<number>`(SELECT count(*) FROM ${rideInvites} i JOIN ${rides} r ON r.id = i.ride_id WHERE i.driver_id = ${q(drivers.id)} AND i.status = 'declined' AND r.pickup_at >= ${start} AND r.pickup_at < ${end})`.mapWith(Number),
+    })
+    .from(drivers)
+    .where(inArray(drivers.status, ['approved', 'expired', 'closed', 'pending']))
+    .orderBy(drivers.fullName);
+
+  const usual = sql<string>`mode() WITHIN GROUP (ORDER BY ${rides.destination})`;
+  const memberUsage = await db
+    .select({ name: members.preferredName, trips: count(), usual })
+    .from(rides)
+    .innerJoin(members, eq(members.id, rides.memberId))
+    .where(and(inMonth, done))
+    .groupBy(members.id, members.preferredName)
+    .orderBy(desc(count()))
+    .limit(10);
+
+  const [expiring] = await db
+    .select({ n: count() })
+    .from(drivers)
+    .where(and(eq(drivers.status, 'approved'), sql`LEAST(${drivers.approvedUntil}, ${drivers.dbsRenewalDate}, ${drivers.insuranceExpiry}) <= current_date + interval '30 days'`));
 
   const pct = (a: number, b: number) => (b === 0 ? null : Math.round((a / b) * 100));
-  const showNames = env().REPORTS_SHOW_MEMBER_NAMES;
-  const finishedRequests = s!.requested - s!.cancelled;
+  const averageRating = ratings?.n ? Math.round(ratings.avg * 10) / 10 : null;
 
   return {
     month,
     summary: {
-      tripsCompleted: s!.completed,
-      tripsCompletedPreviousMonth: s!.prev_completed,
-      liftsRequested: s!.requested,
-      cancelled: s!.cancelled,
-      noDriverFound: s!.no_driver,
-      concernsReported: s!.concerns,
-      concernsReviewed: s!.concerns_reviewed,
-      averageRating: s!.avg_rating,
-      ratingsCount: s!.ratings,
-      membersUsed: s!.members_used,
+      tripsCompleted: completed,
+      tripsCompletedPreviousMonth: prevCompleted,
+      liftsRequested: requested,
+      cancelled,
+      noDriverFound: noDriver,
+      concernsReported: c?.total ?? 0,
+      concernsReviewed: c?.reviewed ?? 0,
+      averageRating,
+      ratingsCount: ratings?.n ?? 0,
+      membersUsed: usage?.n ?? 0,
       expiringDrivers: expiring?.n ?? 0,
     },
     successMeasures: {
-      ridesWithApprovedDriverPct: pct(s!.approved_at_accept, s!.completed),
-      tripsSignedOffWithin7DaysPct: pct(s!.signed_off_7d, s!.completed),
-      incidentsReachingSafeguardingPct: pct(s!.concerns_notified_24h, s!.concerns),
-      requestsMatchedPct: pct(s!.matched_before_pickup, finishedRequests),
-      memberSatisfaction: s!.avg_rating,
+      ridesWithApprovedDriverPct: pct(approvedAtAccept?.n ?? 0, completed),
+      tripsSignedOffWithin7DaysPct: pct(signedOff7d, completed),
+      incidentsReachingSafeguardingPct: pct(c?.notified24h ?? 0, c?.total ?? 0),
+      requestsMatchedPct: pct(matchedBeforePickup, requested - cancelled),
+      memberSatisfaction: averageRating,
     },
     byWeek: byWeek.map((w) => ({ weekStarting: w.week, trips: w.trips })),
     noDriverReasons: [
       ...ineligible.map((r) => ({ reason: INELIGIBLE_LABELS[r.reason as keyof typeof INELIGIBLE_LABELS] ?? r.reason, count: r.n })),
-      ...declineReasons.map((r) => ({ reason: DECLINE_REASONS[r.reason as keyof typeof DECLINE_REASONS] ?? r.reason, count: r.n })),
+      ...declineReasons.map((r) => ({ reason: DECLINE_REASONS[r.reason as keyof typeof DECLINE_REASONS] ?? r.reason ?? 'Unknown', count: r.n })),
     ],
-    // Workload, not a ranking (sponsor decision) — first names only.
     driverWorkload: workload.filter((w) => w.trips > 0 || w.declined > 0).map((w) => ({ name: w.name.split(' ')[0], trips: w.trips, declined: w.declined })),
-    memberUsage: showNames ? memberUsage.map((m) => ({ name: m.name, trips: m.trips, usuallyGoingTo: m.usual })) : null,
+    memberUsage: env().REPORTS_SHOW_MEMBER_NAMES ? memberUsage.map((m) => ({ name: m.name, trips: m.trips, usuallyGoingTo: m.usual })) : null,
     memberUsageCounts: memberUsage.map((m) => m.trips),
   };
 }

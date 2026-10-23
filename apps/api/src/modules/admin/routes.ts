@@ -1,8 +1,10 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { createUserSchema } from '@psebc/shared';
-import { query, queryOne, withTx } from '../../db/pool';
+import { db, withTx } from '../../db/client';
+import { auditLog, settings, users } from '../../db/schema';
 import { ah, parse, uuidParam } from '../../lib/http';
 import { badRequest, notFound } from '../../lib/errors';
 import { requireAuth, requireRole } from '../../middleware/auth';
@@ -15,10 +17,20 @@ adminRouter.get(
   '/users',
   requireRole('admin'),
   ah(async (_req, res) => {
-    const rows = await query(
-      `SELECT id, email, full_name AS "fullName", role, status, mfa_enabled AS "mfaEnabled", member_id AS "memberId", driver_id AS "driverId", last_login_at AS "lastLoginAt"
-         FROM users ORDER BY status, role, full_name`,
-    );
+    const rows = await db
+      .select({
+        id: users.id,
+        email: users.email,
+        fullName: users.fullName,
+        role: users.role,
+        status: users.status,
+        mfaEnabled: users.mfaEnabled,
+        memberId: users.memberId,
+        driverId: users.driverId,
+        lastLoginAt: users.lastLoginAt,
+      })
+      .from(users)
+      .orderBy(asc(users.status), asc(users.role), asc(users.fullName));
     res.json({ users: rows });
   }),
 );
@@ -30,14 +42,21 @@ adminRouter.post(
     const input = parse(createUserSchema, req.body);
     if (input.role === 'member' && !input.memberId) throw badRequest('Choose the member this login is for');
     if (input.role === 'driver' && !input.driverId) throw badRequest('Choose the driver this login is for');
-    const hash = await bcrypt.hash(input.password, 12);
-    const id = await withTx(async (db) => {
-      const [row] = await query<{ id: string }>(
-        `INSERT INTO users (email, full_name, phone, role, password_hash, member_id, driver_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-        [input.email, input.fullName, input.phone ?? null, input.role, hash, input.role === 'member' ? input.memberId : null, input.role === 'driver' ? input.driverId : null],
-        db,
-      );
-      await audit(actorFrom(req), { action: 'user.create', entityType: 'user', entityId: row!.id, details: { role: input.role } }, db);
+    const passwordHash = await bcrypt.hash(input.password, 12);
+    const id = await withTx(async (tx) => {
+      const [row] = await tx
+        .insert(users)
+        .values({
+          email: input.email,
+          fullName: input.fullName,
+          phone: input.phone ?? null,
+          role: input.role,
+          passwordHash,
+          memberId: input.role === 'member' ? input.memberId : null,
+          driverId: input.role === 'driver' ? input.driverId : null,
+        })
+        .returning({ id: users.id });
+      await audit(actorFrom(req), { action: 'user.create', entityType: 'user', entityId: row!.id, details: { role: input.role } }, tx);
       return row!.id;
     });
     res.status(201).json({ id });
@@ -50,8 +69,12 @@ adminRouter.post(
   ah(async (req, res) => {
     const id = uuidParam(req);
     const { password } = parse(z.object({ password: z.string().min(10, 'Use at least 10 characters') }), req.body);
-    const r = await query(`UPDATE users SET password_hash = $2, token_version = token_version + 1, failed_logins = 0, locked_until = NULL WHERE id = $1 RETURNING id`, [id, await bcrypt.hash(password, 12)]);
-    if (!r.length) throw notFound('User');
+    const updated = await db
+      .update(users)
+      .set({ passwordHash: await bcrypt.hash(password, 12), tokenVersion: sql`${users.tokenVersion} + 1`, failedLogins: 0, lockedUntil: null })
+      .where(eq(users.id, id))
+      .returning({ id: users.id });
+    if (!updated.length) throw notFound('User');
     await audit(actorFrom(req), { action: 'user.reset_password', entityType: 'user', entityId: id });
     res.json({ ok: true });
   }),
@@ -62,7 +85,10 @@ adminRouter.post(
   requireRole('admin'),
   ah(async (req, res) => {
     const id = uuidParam(req);
-    await query(`UPDATE users SET mfa_enabled = false, mfa_secret = NULL, token_version = token_version + 1 WHERE id = $1`, [id]);
+    await db
+      .update(users)
+      .set({ mfaEnabled: false, mfaSecret: null, tokenVersion: sql`${users.tokenVersion} + 1` })
+      .where(eq(users.id, id));
     await audit(actorFrom(req), { action: 'user.reset_mfa', entityType: 'user', entityId: id });
     res.json({ ok: true });
   }),
@@ -74,38 +100,50 @@ adminRouter.post(
   requireRole('admin'),
   ah(async (req, res) => {
     const id = uuidParam(req);
-    const u = await queryOne<{ role: string }>('SELECT role FROM users WHERE id = $1', [id]);
-    if (!u) throw notFound('User');
-    await query(`UPDATE users SET status = 'closed', closed_at = now(), token_version = token_version + 1 WHERE id = $1`, [id]);
+    const closed = await db
+      .update(users)
+      .set({ status: 'closed', closedAt: sql`now()`, tokenVersion: sql`${users.tokenVersion} + 1` })
+      .where(eq(users.id, id))
+      .returning({ id: users.id });
+    if (!closed.length) throw notFound('User');
     await audit(actorFrom(req), { action: 'user.close', entityType: 'user', entityId: id });
     res.json({ ok: true });
   }),
 );
 
-/** Audit trail — who saw and changed what (PRD §4 Must have, §9). */
+/** Audit trail — who saw and changed what (PRD §4, §9). */
 adminRouter.get(
   '/audit',
   requireRole('admin', 'safeguarding'),
   ah(async (req, res) => {
     const entityType = String(req.query.entityType ?? '');
     const entityId = String(req.query.entityId ?? '');
-    const rows = await query(
-      `SELECT id, at, actor_name AS "actorName", actor_role AS "actorRole", action, entity_type AS "entityType", entity_id AS "entityId", details
-         FROM audit_log
-        WHERE ($1 = '' OR entity_type = $1) AND ($2 = '' OR entity_id = $2)
-        ORDER BY at DESC LIMIT 200`,
-      [entityType, entityId],
-    );
-    res.json({ entries: rows });
+    const entries = await db
+      .select({
+        id: auditLog.id,
+        at: auditLog.at,
+        actorName: auditLog.actorName,
+        actorRole: auditLog.actorRole,
+        action: auditLog.action,
+        entityType: auditLog.entityType,
+        entityId: auditLog.entityId,
+        details: auditLog.details,
+      })
+      .from(auditLog)
+      .where(and(entityType ? eq(auditLog.entityType, entityType) : undefined, entityId ? eq(auditLog.entityId, entityId) : undefined))
+      .orderBy(desc(auditLog.at))
+      .limit(200);
+    res.json({ entries });
   }),
 );
+
+const asObject = (rows: { key: string; value: unknown }[]) => Object.fromEntries(rows.map((r) => [r.key, r.value]));
 
 adminRouter.get(
   '/settings',
   requireRole('admin', 'safeguarding', 'coordinator'),
   ah(async (_req, res) => {
-    const rows = await query<{ key: string; value: unknown }>('SELECT key, value FROM settings');
-    res.json({ settings: Object.fromEntries(rows.map((r) => [r.key, r.value])) });
+    res.json({ settings: asObject(await db.select({ key: settings.key, value: settings.value }).from(settings)) });
   }),
 );
 
@@ -114,7 +152,6 @@ adminRouter.get(
   '/public-settings',
   requireAuth,
   ah(async (_req, res) => {
-    const rows = await query<{ key: string; value: unknown }>(`SELECT key, value FROM settings WHERE key IN ('church_office_phone')`);
-    res.json(Object.fromEntries(rows.map((r) => [r.key, r.value])));
+    res.json(asObject(await db.select({ key: settings.key, value: settings.value }).from(settings).where(inArray(settings.key, ['church_office_phone']))));
   }),
 );

@@ -1,4 +1,4 @@
-import { closePool } from '../db/pool';
+import { closeDb } from '../db/client';
 import { runAll } from './tasks';
 
 runAll()
@@ -7,4 +7,4 @@ runAll()
     console.error(e);
     process.exitCode = 1;
   })
-  .finally(() => closePool());
+  .finally(() => closeDb());

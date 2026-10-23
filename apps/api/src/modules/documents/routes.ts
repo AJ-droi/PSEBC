@@ -1,5 +1,7 @@
 import { Router } from 'express';
-import { queryOne } from '../../db/pool';
+import { eq } from 'drizzle-orm';
+import { db } from '../../db/client';
+import { documents } from '../../db/schema';
 import { ah, uuidParam } from '../../lib/http';
 import { forbidden, notFound } from '../../lib/errors';
 import { currentUser, requireAuth } from '../../middleware/auth';
@@ -16,12 +18,12 @@ documentsRouter.get(
   requireAuth,
   ah(async (req, res) => {
     const id = uuidParam(req);
-    const doc = await queryOne<{ id: string; driver_id: string; kind: string; filename: string; mime_type: string; data: Buffer }>('SELECT * FROM documents WHERE id = $1', [id]);
+    const [doc] = await db.select().from(documents).where(eq(documents.id, id));
     if (!doc) throw notFound('Document');
     const user = currentUser(req);
     if (doc.kind !== 'photo' && !['admin', 'safeguarding'].includes(user.role)) throw forbidden();
-    if (doc.kind !== 'photo') await audit(actorFrom(req), { action: 'document.open', entityType: 'driver', entityId: doc.driver_id, details: { kind: doc.kind, documentId: id } });
-    res.setHeader('Content-Type', doc.mime_type);
+    if (doc.kind !== 'photo') await audit(actorFrom(req), { action: 'document.open', entityType: 'driver', entityId: doc.driverId, details: { kind: doc.kind, documentId: id } });
+    res.setHeader('Content-Type', doc.mimeType);
     res.setHeader('Cache-Control', 'private, max-age=300');
     res.setHeader('Content-Disposition', `${doc.kind === 'photo' ? 'inline' : 'attachment'}; filename="${doc.filename.replace(/"/g, '')}"`);
     res.send(doc.data);

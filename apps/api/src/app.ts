@@ -5,7 +5,8 @@ import cors from 'cors';
 import helmet from 'helmet';
 import { pinoHttp } from 'pino-http';
 import { env } from './config/env';
-import { getPool } from './db/pool';
+import { sql } from 'drizzle-orm';
+import { db } from './db/client';
 import { logger } from './lib/logger';
 import { errorHandler, notFoundHandler } from './middleware/error';
 import { loadUser } from './middleware/auth';
@@ -42,7 +43,7 @@ export function createApp() {
 
   app.get('/api/health', async (_req, res) => {
     try {
-      await getPool().query('SELECT 1');
+      await db.execute(sql`SELECT 1`);
       res.json({ ok: true });
     } catch {
       res.status(503).json({ ok: false });

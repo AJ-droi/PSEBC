@@ -19,7 +19,9 @@ process.env.NOTIFY_EMAIL_DRIVER = 'none';
 process.env.NOTIFY_SMS_DRIVER = 'none';
 
 const { createApp } = await import('../src/app');
-const { getPool, closePool, query } = await import('../src/db/pool');
+const { getDb, closeDb } = await import('../src/db/client');
+/** Raw SQL for assertions, so tests check what is really stored rather than what the ORM returns. */
+const query = async <T = Record<string, unknown>>(text: string, params: unknown[] = []): Promise<T[]> => (await getDb().$client.query(text, params)).rows as T[];
 const { seed } = await import('../src/db/seed');
 const jobs = await import('../src/jobs/tasks');
 
@@ -81,13 +83,13 @@ const ridePayload = (over: Record<string, unknown> = {}) => ({
 });
 
 beforeAll(async () => {
-  await getPool().query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+  await query('DROP SCHEMA IF EXISTS drizzle CASCADE; DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
   await seed(() => undefined);
   app = createApp();
 });
 
 afterAll(async () => {
-  await closePool();
+  await closeDb();
 });
 
 describe('PSEBC journey', () => {
@@ -385,6 +387,18 @@ describe('PSEBC journey', () => {
     expect(res.body.openConcern).toBe(true);
     const n = await query(`SELECT 1 FROM notifications WHERE kind = 'felt_unsafe' AND ride_id = $1`, [r.body.id]);
     expect(n.length).toBeGreaterThan(0);
+  });
+
+  it('PSEBC-26 (5.3): office sees "trip log by phone" only for members without a login', async () => {
+    const [edna] = await query<{ id: string }>(`SELECT id FROM members WHERE preferred_name = 'Edna'`);
+    const r = await coordinator.post('/api/rides').send(ridePayload({ memberId: edna!.id, pickupAt: inDays(17), returnAt: null, returnNeeded: false }));
+    await david.post(`/api/rides/${r.body.id}/accept`).send();
+    await david.post(`/api/rides/${r.body.id}/progress`).send({ event: 'picked_up' });
+    await david.post(`/api/rides/${r.body.id}/progress`).send({ event: 'dropped_off' });
+    const overview = await coordinator.get('/api/office/overview');
+    const phoneLogs = overview.body.attention.filter((a: { type: string }) => a.type === 'phone_log');
+    expect(phoneLogs.map((a: { rideId: string }) => a.rideId)).toContain(r.body.id);
+    expect(phoneLogs.every((a: { memberName: string }) => a.memberName !== 'Margaret Evans')).toBe(true); // Margaret has a login
   });
 
   it('PSEBC-10 (1.4): reminder 30 days before expiry; on expiry status becomes Expired automatically', async () => {

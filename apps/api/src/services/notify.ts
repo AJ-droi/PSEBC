@@ -1,5 +1,7 @@
+import { and, asc, eq, inArray, lt, or, sql } from 'drizzle-orm';
 import { env } from '../config/env';
-import { getPool, query, type Queryable } from '../db/pool';
+import { db, type Executor } from '../db/client';
+import { members, notifications, users } from '../db/schema';
 import { logger } from '../lib/logger';
 
 /**
@@ -20,26 +22,25 @@ export interface Message {
   rideId?: string | null;
 }
 
+type Channel = 'in_app' | 'email' | 'sms' | 'phone_task';
+const activeUser = eq(users.status, 'active');
+
 /** In-app + email/SMS to specific logins. */
-export async function notifyUsers(db: Queryable, userIds: string[], msg: Message, opts: { sms?: boolean; email?: boolean } = {}): Promise<void> {
+export async function notifyUsers(tx: Executor, userIds: string[], msg: Message, opts: { sms?: boolean; email?: boolean } = {}): Promise<void> {
   if (userIds.length === 0) return;
-  const users = await query<{ id: string; email: string; phone: string | null }>(
-    `SELECT id, email, phone FROM users WHERE id = ANY($1::uuid[]) AND status = 'active'`,
-    [userIds],
-    db,
-  );
-  for (const u of users) {
-    await insert(db, { userId: u.id, channel: 'in_app', ...msg });
-    if (opts.email) await insert(db, { userId: u.id, channel: 'email', to: u.email, ...msg });
-    if (opts.sms && u.phone) await insert(db, { userId: u.id, channel: 'sms', to: u.phone, ...msg });
+  const rows = await tx.select({ id: users.id, email: users.email, phone: users.phone }).from(users).where(and(inArray(users.id, userIds), activeUser));
+  for (const u of rows) {
+    await insert(tx, { userId: u.id, channel: 'in_app', ...msg });
+    if (opts.email) await insert(tx, { userId: u.id, channel: 'email', to: u.email, ...msg });
+    if (opts.sms && u.phone) await insert(tx, { userId: u.id, channel: 'sms', to: u.phone, ...msg });
   }
 }
 
 /** Everyone in a role (e.g. all coordinators, the safeguarding lead and delegates). */
-export async function notifyRole(db: Queryable, roles: string[], msg: Message, opts: { email?: boolean; sms?: boolean } = {}): Promise<void> {
-  const rows = await query<{ id: string }>(`SELECT id FROM users WHERE role::text = ANY($1) AND status = 'active'`, [roles], db);
+export async function notifyRole(tx: Executor, roles: (typeof users.$inferSelect.role)[], msg: Message, opts: { email?: boolean; sms?: boolean } = {}): Promise<void> {
+  const rows = await tx.select({ id: users.id }).from(users).where(and(inArray(users.role, roles), activeUser));
   await notifyUsers(
-    db,
+    tx,
     rows.map((r) => r.id),
     msg,
     opts,
@@ -47,10 +48,10 @@ export async function notifyRole(db: Queryable, roles: string[], msg: Message, o
 }
 
 /** The driver's login(s): in-app and a text so they see invites quickly. */
-export async function notifyDriver(db: Queryable, driverId: string, msg: Message): Promise<void> {
-  const rows = await query<{ id: string }>(`SELECT id FROM users WHERE driver_id = $1 AND status = 'active'`, [driverId], db);
+export async function notifyDriver(tx: Executor, driverId: string, msg: Message): Promise<void> {
+  const rows = await tx.select({ id: users.id }).from(users).where(and(eq(users.driverId, driverId), activeUser));
   await notifyUsers(
-    db,
+    tx,
     rows.map((r) => r.id),
     msg,
     { sms: true },
@@ -61,44 +62,41 @@ export async function notifyDriver(db: Queryable, driverId: string, msg: Message
  * A member is told in the way they asked for on F01 screen 2. Members who don't use
  * the app get a text, or — if they prefer a call — a phone task for the church office (story 2.2).
  */
-export async function notifyMember(db: Queryable, memberId: string, msg: Message): Promise<void> {
-  const [m] = await query<{ phone: string; can_receive_sms: boolean; contact_method: string; preferred_name: string; representative_phone: string }>(
-    `SELECT phone, can_receive_sms, contact_method, preferred_name, representative_phone FROM members WHERE id = $1`,
-    [memberId],
-    db,
-  );
+export async function notifyMember(tx: Executor, memberId: string, msg: Message): Promise<void> {
+  const [m] = await tx
+    .select({ phone: members.phone, canReceiveSms: members.canReceiveSms, contactMethod: members.contactMethod, preferredName: members.preferredName, representativePhone: members.representativePhone })
+    .from(members)
+    .where(eq(members.id, memberId));
   if (!m) return;
-  const logins = await query<{ id: string }>(`SELECT id FROM users WHERE member_id = $1 AND status = 'active'`, [memberId], db);
-  for (const u of logins) await insert(db, { userId: u.id, channel: 'in_app', ...msg });
+  const logins = await tx.select({ id: users.id }).from(users).where(and(eq(users.memberId, memberId), activeUser));
+  for (const u of logins) await insert(tx, { userId: u.id, channel: 'in_app', ...msg });
 
-  if (m.contact_method === 'text' && m.can_receive_sms) {
-    await insert(db, { memberId, channel: 'sms', to: m.phone, ...msg });
-  } else if (m.contact_method === 'family' && m.representative_phone) {
-    await insert(db, { memberId, channel: 'sms', to: m.representative_phone, ...msg });
+  if (m.contactMethod === 'text' && m.canReceiveSms) {
+    await insert(tx, { memberId, channel: 'sms', to: m.phone, ...msg });
+  } else if (m.contactMethod === 'family' && m.representativePhone) {
+    await insert(tx, { memberId, channel: 'sms', to: m.representativePhone, ...msg });
   } else {
     // Phone call or "through the church office": create a call task for coordinators.
-    const coordinators = await query<{ id: string }>(`SELECT id FROM users WHERE role IN ('coordinator', 'admin') AND status = 'active'`, [], db);
-    for (const c of coordinators) {
-      await insert(db, {
-        userId: c.id,
-        memberId,
-        channel: 'phone_task',
-        ...msg,
-        title: `Please call ${m.preferred_name}: ${msg.title}`,
-      });
+    const office = await tx.select({ id: users.id }).from(users).where(and(inArray(users.role, ['coordinator', 'admin']), activeUser));
+    for (const c of office) {
+      await insert(tx, { userId: c.id, memberId, channel: 'phone_task', ...msg, title: `Please call ${m.preferredName}: ${msg.title}` });
     }
   }
 }
 
-async function insert(
-  db: Queryable,
-  n: Message & { userId?: string; memberId?: string; channel: 'in_app' | 'email' | 'sms' | 'phone_task'; to?: string },
-): Promise<void> {
-  await db.query(
-    `INSERT INTO notifications (user_id, member_id, channel, to_address, kind, title, body, link, ride_id, delivered)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-    [n.userId ?? null, n.memberId ?? null, n.channel, n.to ?? null, n.kind, n.title, n.body, n.link ?? null, n.rideId ?? null, n.channel === 'in_app' || n.channel === 'phone_task'],
-  );
+async function insert(tx: Executor, n: Message & { userId?: string; memberId?: string; channel: Channel; to?: string }): Promise<void> {
+  await tx.insert(notifications).values({
+    userId: n.userId ?? null,
+    memberId: n.memberId ?? null,
+    channel: n.channel,
+    toAddress: n.to ?? null,
+    kind: n.kind,
+    title: n.title,
+    body: n.body,
+    link: n.link ?? null,
+    rideId: n.rideId ?? null,
+    delivered: n.channel === 'in_app' || n.channel === 'phone_task',
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -143,20 +141,24 @@ export async function flushOutbox(limit = 50): Promise<number> {
   flushing = true;
   let sent = 0;
   try {
-    const pending = await query<{ id: string; channel: 'email' | 'sms'; to_address: string; title: string; body: string }>(
-      `SELECT id, channel, to_address, title, body FROM notifications
-        WHERE delivered = false AND channel IN ('email', 'sms') AND attempts < 5
-        ORDER BY created_at LIMIT $1`,
-      [limit],
-    );
+    const pending = await db
+      .select({ id: notifications.id, channel: notifications.channel, to: notifications.toAddress, title: notifications.title, body: notifications.body })
+      .from(notifications)
+      .where(and(eq(notifications.delivered, false), or(eq(notifications.channel, 'email'), eq(notifications.channel, 'sms')), lt(notifications.attempts, 5)))
+      .orderBy(asc(notifications.createdAt))
+      .limit(limit);
     for (const n of pending) {
-      const sender = senderFor(n.channel);
+      const channel = n.channel as 'email' | 'sms';
+      const sender = senderFor(channel);
       try {
-        if (sender) await sender.send(n.channel, n.to_address, n.title, n.body);
-        await getPool().query(`UPDATE notifications SET delivered = true, attempts = attempts + 1 WHERE id = $1`, [n.id]);
+        if (sender) await sender.send(channel, n.to ?? '', n.title, n.body);
+        await db.update(notifications).set({ delivered: true, attempts: sql`${notifications.attempts} + 1` }).where(eq(notifications.id, n.id));
         sent++;
       } catch (err) {
-        await getPool().query(`UPDATE notifications SET attempts = attempts + 1, last_error = $2 WHERE id = $1`, [n.id, String((err as Error).message).slice(0, 300)]);
+        await db
+          .update(notifications)
+          .set({ attempts: sql`${notifications.attempts} + 1`, lastError: String((err as Error).message).slice(0, 300) })
+          .where(eq(notifications.id, n.id));
       }
     }
   } finally {

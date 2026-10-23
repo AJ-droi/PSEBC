@@ -1,7 +1,7 @@
 import { env } from './config/env';
 import { createApp } from './app';
 import { migrate } from './db/migrate';
-import { closePool } from './db/pool';
+import { closeDb } from './db/client';
 import { logger } from './lib/logger';
 import { startScheduler } from './jobs/scheduler';
 
@@ -14,7 +14,7 @@ async function main() {
   const shutdown = () => {
     logger.info('shutting down');
     server.close(() => {
-      closePool().finally(() => process.exit(0));
+      closeDb().finally(() => process.exit(0));
     });
   };
   process.on('SIGTERM', shutdown);

@@ -2,7 +2,9 @@ import type { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { MFA_ROLES, type Role } from '@psebc/shared';
 import { env } from '../config/env';
-import { queryOne } from '../db/pool';
+import { eq } from 'drizzle-orm';
+import { db } from '../db/client';
+import { users } from '../db/schema';
 import { forbidden, unauthorised } from '../lib/errors';
 
 export const SESSION_COOKIE = 'psebc_session';
@@ -66,27 +68,30 @@ export async function loadUser(req: Request, _res: Response, next: NextFunction)
     } catch {
       return next();
     }
-    const row = await queryOne<{
-      id: string;
-      role: Role;
-      full_name: string;
-      email: string;
-      member_id: string | null;
-      driver_id: string | null;
-      mfa_enabled: boolean;
-      status: string;
-      token_version: number;
-    }>('SELECT id, role, full_name, email, member_id, driver_id, mfa_enabled, status, token_version FROM users WHERE id = $1', [payload.sub]);
-    if (!row || row.status !== 'active' || row.token_version !== payload.tv) return next();
+    const [row] = await db
+      .select({
+        id: users.id,
+        role: users.role,
+        fullName: users.fullName,
+        email: users.email,
+        memberId: users.memberId,
+        driverId: users.driverId,
+        mfaEnabled: users.mfaEnabled,
+        status: users.status,
+        tokenVersion: users.tokenVersion,
+      })
+      .from(users)
+      .where(eq(users.id, payload.sub));
+    if (!row || row.status !== 'active' || row.tokenVersion !== payload.tv) return next();
     const needsMfa = MFA_ROLES.includes(row.role);
     req.user = {
       id: row.id,
       role: row.role,
-      fullName: row.full_name,
+      fullName: row.fullName,
       email: row.email,
-      memberId: row.member_id,
-      driverId: row.driver_id,
-      mfaEnabled: row.mfa_enabled,
+      memberId: row.memberId,
+      driverId: row.driverId,
+      mfaEnabled: row.mfaEnabled,
       mfaPassed: !needsMfa || payload.mfa,
     };
     next();

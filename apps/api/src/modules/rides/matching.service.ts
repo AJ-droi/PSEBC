@@ -1,34 +1,22 @@
-import type { PoolClient } from 'pg';
+import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import {
   DRIVER_BUSY,
   INELIGIBLE_LABELS,
   findEligibleDrivers,
-  type MatchDriver,
-  type MatchMemberNeeds,
   type HelpCap,
   type HelpNeeded,
+  type IneligibleReason,
+  type MatchDriver,
+  type MatchMemberNeeds,
   type MobilityAid,
   type VehicleCap,
   type VehicleRequirement,
-  type DriverStatus,
-  type IneligibleReason,
 } from '@psebc/shared';
-import { query } from '../../db/pool';
+import type { Tx } from '../../db/client';
+import { driverExclusions, drivers, members, rideInvites, rides, type Ride } from '../../db/schema';
 import { formatWhen } from '../../lib/time';
 import { audit, type Actor } from '../../services/audit';
 import { notifyDriver, notifyRole } from '../../services/notify';
-import type { RideRow } from './repo';
-
-interface DriverRow {
-  id: string;
-  status: DriverStatus;
-  approved_until: string | null;
-  dbs_renewal_date: string | null;
-  insurance_expiry: string | null;
-  passenger_seats: number;
-  vehicle_caps: VehicleCap[];
-  help_caps: HelpCap[];
-}
 
 export interface MatchOutcome {
   invited: string[];
@@ -46,78 +34,74 @@ const asDate = (d: string | null) => (d ? new Date(`${d}T00:00:00Z`) : null);
  *
  * Must be called inside a transaction that already holds a row lock on the ride.
  */
-export async function matchAndInvite(db: PoolClient, ride: RideRow, actor: Actor): Promise<MatchOutcome> {
-  const [member] = await query<{ id: string; mobility_aids: MobilityAid[]; help_needed: HelpNeeded[]; vehicle_requirement: VehicleRequirement; postcode: string; town: string }>(
-    'SELECT id, mobility_aids, help_needed, vehicle_requirement, postcode, town FROM members WHERE id = $1',
-    [ride.member_id],
-    db,
-  );
+export async function matchAndInvite(tx: Tx, ride: Ride, actor: Actor): Promise<MatchOutcome> {
+  const [member] = await tx
+    .select({ id: members.id, mobilityAids: members.mobilityAids, helpNeeded: members.helpNeeded, vehicleRequirement: members.vehicleRequirement, postcode: members.postcode, town: members.town })
+    .from(members)
+    .where(eq(members.id, ride.memberId));
   if (!member) throw new Error('member missing for ride');
 
-  const drivers = await query<DriverRow>(
-    `SELECT id, status, approved_until, dbs_renewal_date, insurance_expiry, passenger_seats, vehicle_caps, help_caps
-       FROM drivers WHERE status <> 'closed'`,
-    [],
-    db,
-  );
-  const busy = await query<{ driver_id: string; pickup_at: Date; return_at: Date | null }>(
-    `SELECT driver_id, pickup_at, return_at FROM rides
-      WHERE driver_id IS NOT NULL AND status = ANY($1::ride_status[]) AND id <> $2
-        AND pickup_at BETWEEN $3::timestamptz - interval '1 day' AND $3::timestamptz + interval '1 day'`,
-    [DRIVER_BUSY, ride.id, ride.pickup_at],
-    db,
-  );
-  const exclusions = await query<{ driver_id: string; member_id: string }>('SELECT driver_id, member_id FROM driver_exclusions WHERE member_id = $1', [member.id], db);
-  const priorInvites = await query<{ driver_id: string; status: string }>('SELECT driver_id, status FROM ride_invites WHERE ride_id = $1', [ride.id], db);
-  const alreadyAsked = new Set(priorInvites.filter((i) => i.status === 'sent' || i.status === 'declined').map((i) => i.driver_id));
+  const candidates = await tx.select().from(drivers).where(ne(drivers.status, 'closed'));
+  const busy = await tx
+    .select({ driverId: rides.driverId, pickupAt: rides.pickupAt, returnAt: rides.returnAt })
+    .from(rides)
+    .where(
+      and(
+        inArray(rides.status, [...DRIVER_BUSY]),
+        ne(rides.id, ride.id),
+        sql`${rides.driverId} IS NOT NULL`,
+        sql`${rides.pickupAt} BETWEEN ${ride.pickupAt}::timestamptz - interval '1 day' AND ${ride.pickupAt}::timestamptz + interval '1 day'`,
+      ),
+    );
+  const exclusions = await tx.select().from(driverExclusions).where(eq(driverExclusions.memberId, member.id));
+  const priorInvites = await tx.select({ driverId: rideInvites.driverId, status: rideInvites.status }).from(rideInvites).where(eq(rideInvites.rideId, ride.id));
+  const alreadyAsked = new Set(priorInvites.filter((i) => i.status === 'sent' || i.status === 'declined').map((i) => i.driverId));
 
   const needs: MatchMemberNeeds = {
     id: member.id,
-    mobilityAids: member.mobility_aids,
-    helpNeeded: member.help_needed,
-    vehicleRequirement: member.vehicle_requirement,
+    mobilityAids: member.mobilityAids as MobilityAid[],
+    helpNeeded: member.helpNeeded as HelpNeeded[],
+    vehicleRequirement: member.vehicleRequirement as VehicleRequirement,
   };
-  const candidates: MatchDriver[] = drivers.map((d) => ({
+  const pool: MatchDriver[] = candidates.map((d) => ({
     id: d.id,
     status: d.status,
-    approvedUntil: asDate(d.approved_until),
-    dbsExpiry: asDate(d.dbs_renewal_date),
-    insuranceExpiry: asDate(d.insurance_expiry),
-    passengerSeats: d.passenger_seats,
-    vehicleCaps: d.vehicle_caps,
-    helpCaps: d.help_caps,
-    busyTimes: busy.filter((b) => b.driver_id === d.id).flatMap((b) => [b.pickup_at, b.return_at].filter((t): t is Date => !!t)),
-    excludedMemberIds: exclusions.filter((e) => e.driver_id === d.id).map((e) => e.member_id),
+    approvedUntil: asDate(d.approvedUntil),
+    dbsExpiry: asDate(d.dbsRenewalDate),
+    insuranceExpiry: asDate(d.insuranceExpiry),
+    passengerSeats: d.passengerSeats,
+    vehicleCaps: d.vehicleCaps as VehicleCap[],
+    helpCaps: d.helpCaps as HelpCap[],
+    busyTimes: busy.filter((b) => b.driverId === d.id).flatMap((b) => [b.pickupAt, b.returnAt].filter((t): t is Date => !!t)),
+    excludedMemberIds: exclusions.filter((e) => e.driverId === d.id).map((e) => e.memberId),
   }));
 
-  const result = findEligibleDrivers(
-    needs,
-    { pickupAt: ride.pickup_at, returnAt: ride.return_needed ? ride.return_at : null, companion: ride.companion },
-    candidates,
-  );
+  const result = findEligibleDrivers(needs, { pickupAt: ride.pickupAt, returnAt: ride.returnNeeded ? ride.returnAt : null, companion: ride.companion }, pool);
   const toInvite = result.eligible.filter((id) => !alreadyAsked.has(id));
   const stillOpen = priorInvites.some((i) => i.status === 'sent');
 
   for (const driverId of toInvite) {
-    await db.query(
-      `INSERT INTO ride_invites (ride_id, driver_id) VALUES ($1, $2)
-       ON CONFLICT (ride_id, driver_id) DO UPDATE SET status = 'sent', sent_at = now(), responded_at = NULL, decline_reason = NULL`,
-      [ride.id, driverId],
-    );
-    await notifyDriver(db, driverId, {
+    await tx
+      .insert(rideInvites)
+      .values({ rideId: ride.id, driverId })
+      .onConflictDoUpdate({
+        target: [rideInvites.rideId, rideInvites.driverId],
+        set: { status: 'sent', sentAt: sql`now()`, respondedAt: null, declineReason: null },
+      });
+    await notifyDriver(tx, driverId, {
       kind: 'invite',
       title: 'New lift request',
-      body: `${formatWhen(ride.pickup_at)} from ${member.postcode.split(' ')[0]}, ${member.town} to ${ride.destination}. First to accept gets the lift.`,
+      body: `${formatWhen(ride.pickupAt)} from ${member.postcode.split(' ')[0]}, ${member.town} to ${ride.destination}. First to accept gets the lift.`,
       link: `/driver/invites/${ride.id}`,
       rideId: ride.id,
     });
   }
 
   const status: MatchOutcome['status'] = toInvite.length > 0 || stillOpen ? 'invites_sent' : 'unmatched';
-  await db.query(
-    `UPDATE rides SET status = $2::ride_status, unmatched_flagged_at = CASE WHEN $2::text = 'unmatched' THEN now() ELSE NULL END, updated_at = now() WHERE id = $1`,
-    [ride.id, status],
-  );
+  await tx
+    .update(rides)
+    .set({ status, unmatchedFlaggedAt: status === 'unmatched' ? new Date() : null, updatedAt: sql`now()` })
+    .where(eq(rides.id, ride.id));
 
   if (status === 'unmatched') {
     const counts = result.rejected.reduce<Record<string, number>>((acc, r) => {
@@ -128,28 +112,13 @@ export async function matchAndInvite(db: PoolClient, ride: RideRow, actor: Actor
       .map(([k, v]) => `${v} ${k.toLowerCase()}`)
       .join('; ');
     await notifyRole(
-      db,
+      tx,
       ['coordinator', 'admin'],
-      {
-        kind: 'unmatched',
-        title: 'No driver for a lift',
-        body: `No eligible driver for ${formatWhen(ride.pickup_at)}. ${why || 'No approved drivers yet.'}`,
-        link: `/office/rides/${ride.id}`,
-        rideId: ride.id,
-      },
+      { kind: 'unmatched', title: 'No driver for a lift', body: `No eligible driver for ${formatWhen(ride.pickupAt)}. ${why || 'No approved drivers yet.'}`, link: `/office/rides/${ride.id}`, rideId: ride.id },
       { email: true },
     );
   }
 
-  await audit(
-    actor,
-    {
-      action: 'ride.match',
-      entityType: 'ride',
-      entityId: ride.id,
-      details: { invited: toInvite.length, eligible: result.eligible.length, rejected: result.rejected, status },
-    },
-    db,
-  );
+  await audit(actor, { action: 'ride.match', entityType: 'ride', entityId: ride.id, details: { invited: toInvite.length, eligible: result.eligible.length, rejected: result.rejected, status } }, tx);
   return { invited: toInvite, eligibleCount: result.eligible.length, rejected: result.rejected, status };
 }

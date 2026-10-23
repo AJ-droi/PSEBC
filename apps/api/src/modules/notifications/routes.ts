@@ -1,5 +1,7 @@
 import { Router } from 'express';
-import { query } from '../../db/pool';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { db } from '../../db/client';
+import { notifications } from '../../db/schema';
 import { ah, uuidParam } from '../../lib/http';
 import { currentUser, requireAuth } from '../../middleware/auth';
 
@@ -9,15 +11,22 @@ notificationsRouter.get(
   '/',
   requireAuth,
   ah(async (req, res) => {
-    const user = currentUser(req);
-    const rows = await query(
-      `SELECT id, kind, title, body, link, channel, read_at AS "readAt", created_at AS "createdAt"
-         FROM notifications WHERE user_id = $1 AND channel IN ('in_app', 'phone_task')
-        ORDER BY created_at DESC LIMIT 50`,
-      [user.id],
-    );
-    const unread = rows.filter((r) => !(r as { readAt: unknown }).readAt).length;
-    res.json({ notifications: rows, unread });
+    const rows = await db
+      .select({
+        id: notifications.id,
+        kind: notifications.kind,
+        title: notifications.title,
+        body: notifications.body,
+        link: notifications.link,
+        channel: notifications.channel,
+        readAt: notifications.readAt,
+        createdAt: notifications.createdAt,
+      })
+      .from(notifications)
+      .where(and(eq(notifications.userId, currentUser(req).id), inArray(notifications.channel, ['in_app', 'phone_task'])))
+      .orderBy(desc(notifications.createdAt))
+      .limit(50);
+    res.json({ notifications: rows, unread: rows.filter((r) => !r.readAt).length });
   }),
 );
 
@@ -25,7 +34,10 @@ notificationsRouter.post(
   '/:id/read',
   requireAuth,
   ah(async (req, res) => {
-    await query('UPDATE notifications SET read_at = now() WHERE id = $1 AND user_id = $2 AND read_at IS NULL', [uuidParam(req), currentUser(req).id]);
+    await db
+      .update(notifications)
+      .set({ readAt: sql`now()` })
+      .where(and(eq(notifications.id, uuidParam(req)), eq(notifications.userId, currentUser(req).id), isNull(notifications.readAt)));
     res.json({ ok: true });
   }),
 );
@@ -34,7 +46,10 @@ notificationsRouter.post(
   '/read-all',
   requireAuth,
   ah(async (req, res) => {
-    await query(`UPDATE notifications SET read_at = now() WHERE user_id = $1 AND read_at IS NULL AND channel = 'in_app'`, [currentUser(req).id]);
+    await db
+      .update(notifications)
+      .set({ readAt: sql`now()` })
+      .where(and(eq(notifications.userId, currentUser(req).id), isNull(notifications.readAt), eq(notifications.channel, 'in_app')));
     res.json({ ok: true });
   }),
 );

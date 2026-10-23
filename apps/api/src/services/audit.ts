@@ -1,5 +1,6 @@
 import type { Request } from 'express';
-import { getPool, type Queryable } from '../db/pool';
+import { db, type Executor } from '../db/client';
+import { auditLog } from '../db/schema';
 import type { SessionUser } from '../middleware/auth';
 
 /**
@@ -27,10 +28,15 @@ export function actorFrom(req: Request): Actor {
   return u ? { id: u.id, role: u.role, name: u.fullName, ip: req.ip ?? null } : { id: null, role: 'anonymous', name: 'Anonymous', ip: req.ip ?? null };
 }
 
-export async function audit(actor: Actor, entry: AuditEntry, db: Queryable = getPool()): Promise<void> {
-  await db.query(
-    `INSERT INTO audit_log (actor_id, actor_role, actor_name, action, entity_type, entity_id, details, ip)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [actor.id, actor.role, actor.name, entry.action, entry.entityType, entry.entityId ?? null, JSON.stringify(entry.details ?? {}), actor.ip ?? null],
-  );
+export async function audit(actor: Actor, entry: AuditEntry, tx: Executor = db): Promise<void> {
+  await tx.insert(auditLog).values({
+    actorId: actor.id,
+    actorRole: actor.role,
+    actorName: actor.name,
+    action: entry.action,
+    entityType: entry.entityType,
+    entityId: entry.entityId ?? null,
+    details: entry.details ?? {},
+    ip: actor.ip ?? null,
+  });
 }

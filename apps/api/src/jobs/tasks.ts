@@ -1,10 +1,12 @@
+import { and, eq, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import { RULES } from '@psebc/shared';
-import { query, withTx } from '../db/pool';
+import { db, withTx } from '../db/client';
+import { tripLogExists } from '../db/sql';
+import { documents, drivers, members, rideInvites, rides, settings, users } from '../db/schema';
 import { formatWhen } from '../lib/time';
 import { logger } from '../lib/logger';
 import { audit, SYSTEM_ACTOR } from '../services/audit';
 import { flushOutbox, notifyDriver, notifyMember, notifyRole } from '../services/notify';
-import type { RideRow } from '../modules/rides/repo';
 
 /**
  * Background checks. Each is idempotent and safe to run at any interval, so they
@@ -12,104 +14,121 @@ import type { RideRow } from '../modules/rides/repo';
  */
 
 async function setting(key: string, fallback: number): Promise<number> {
-  const rows = await query<{ value: unknown }>('SELECT value FROM settings WHERE key = $1', [key]);
-  const v = Number(rows[0]?.value);
+  const [row] = await db.select({ value: settings.value }).from(settings).where(eq(settings.key, key));
+  const v = Number(row?.value);
   return Number.isFinite(v) && v > 0 ? v : fallback;
 }
+
+const HOUR = 3_600_000;
+const DAY = 24 * HOUR;
+const earliestExpiry = sql<string>`LEAST(${drivers.approvedUntil}, ${drivers.dbsRenewalDate}, ${drivers.insuranceExpiry})`;
 
 /** Story 3.3 (PSEBC-19): flag to the coordinator if no driver accepts within 24h, or 2h before pickup. */
 export async function flagUnmatched(now = new Date()): Promise<number> {
   const afterH = await setting('unmatched_after_hours', RULES.unmatchedAfterHours);
   const beforeH = await setting('unmatched_before_pickup_hours', RULES.unmatchedBeforePickupHours);
-  const rides = await query<RideRow>(
-    `SELECT * FROM rides WHERE status = 'invites_sent'
-       AND (created_at <= $1::timestamptz - make_interval(hours => $2::int) OR pickup_at <= $1::timestamptz + make_interval(hours => $3::int))`,
-    [now, afterH, beforeH],
-  );
-  for (const ride of rides) {
-    await withTx(async (db) => {
-      const r = await db.query(`UPDATE rides SET status = 'unmatched', unmatched_flagged_at = $2, updated_at = now() WHERE id = $1 AND status = 'invites_sent'`, [ride.id, now]);
-      if (r.rowCount === 0) return;
-      await notifyRole(db, ['coordinator', 'admin'], {
-        kind: 'unmatched',
-        title: 'No driver has accepted yet',
-        body: `Nobody has accepted the lift on ${formatWhen(ride.pickup_at)}. Please call the member or re-send invites.`,
-        link: `/office/rides/${ride.id}`,
-        rideId: ride.id,
-      }, { email: true, sms: true });
-      await audit(SYSTEM_ACTOR, { action: 'ride.flag_unmatched', entityType: 'ride', entityId: ride.id }, db);
+  const due = await db
+    .select()
+    .from(rides)
+    .where(and(eq(rides.status, 'invites_sent'), or(lte(rides.createdAt, new Date(now.getTime() - afterH * HOUR)), lte(rides.pickupAt, new Date(now.getTime() + beforeH * HOUR)))));
+  for (const ride of due) {
+    await withTx(async (tx) => {
+      const flagged = await tx
+        .update(rides)
+        .set({ status: 'unmatched', unmatchedFlaggedAt: now, updatedAt: sql`now()` })
+        .where(and(eq(rides.id, ride.id), eq(rides.status, 'invites_sent')))
+        .returning({ id: rides.id });
+      if (!flagged.length) return;
+      await notifyRole(
+        tx,
+        ['coordinator', 'admin'],
+        { kind: 'unmatched', title: 'No driver has accepted yet', body: `Nobody has accepted the lift on ${formatWhen(ride.pickupAt)}. Please call the member or re-send invites.`, link: `/office/rides/${ride.id}`, rideId: ride.id },
+        { email: true, sms: true },
+      );
+      await audit(SYSTEM_ACTOR, { action: 'ride.flag_unmatched', entityType: 'ride', entityId: ride.id }, tx);
     });
   }
-  return rides.length;
+  return due.length;
 }
 
 /** Requests that reach pickup time with no driver are closed as "no driver found". */
 export async function closeExpiredRequests(now = new Date()): Promise<number> {
-  const rows = await query<{ id: string; member_id: string; pickup_at: Date }>(
-    `UPDATE rides SET status = 'cancelled', cancel_reason = 'no_driver', cancelled_at = $1, updated_at = now()
-      WHERE status IN ('requested', 'invites_sent', 'unmatched') AND pickup_at < $1::timestamptz - interval '1 hour'
-      RETURNING id, member_id, pickup_at`,
-    [now],
-  );
-  for (const r of rows) {
-    await query(`UPDATE ride_invites SET status = 'withdrawn', responded_at = now() WHERE ride_id = $1 AND status = 'sent'`, [r.id]);
+  const closed = await db
+    .update(rides)
+    .set({ status: 'cancelled', cancelReason: 'no_driver', cancelledAt: now, updatedAt: sql`now()` })
+    .where(and(inArray(rides.status, ['requested', 'invites_sent', 'unmatched']), lt(rides.pickupAt, new Date(now.getTime() - HOUR))))
+    .returning({ id: rides.id });
+  for (const r of closed) {
+    await db
+      .update(rideInvites)
+      .set({ status: 'withdrawn', respondedAt: sql`now()` })
+      .where(and(eq(rideInvites.rideId, r.id), eq(rideInvites.status, 'sent')));
     await audit(SYSTEM_ACTOR, { action: 'ride.no_driver', entityType: 'ride', entityId: r.id });
   }
-  return rows.length;
+  return closed.length;
 }
 
 /** Story 6.1: ready for sign-off 72 hours after completion if a log is missing (missing log noted). */
 export async function applyLogTimeout(now = new Date()): Promise<number> {
-  const rides = await query<{ id: string; driver_logged: boolean; member_logged: boolean }>(
-    `SELECT r.id,
-            EXISTS (SELECT 1 FROM trip_logs l WHERE l.ride_id = r.id AND l.author = 'driver') AS driver_logged,
-            EXISTS (SELECT 1 FROM trip_logs l WHERE l.ride_id = r.id AND l.author = 'member') AS member_logged
-       FROM rides r WHERE r.status = 'completed' AND r.logs_due_at <= $1`,
-    [now],
-  );
-  for (const r of rides) {
-    const missing = [!r.driver_logged && 'driver log', !r.member_logged && 'member log'].filter(Boolean).join(' and ');
-    await query(`UPDATE rides SET status = 'logged', logged_at = $2, missing_log_note = $3, updated_at = now() WHERE id = $1 AND status = 'completed'`, [r.id, now, missing ? `${missing[0]!.toUpperCase()}${missing.slice(1)} missing (72 hours passed)` : null]);
+  const due = await db
+    .select({ id: rides.id, driverLogged: tripLogExists('driver'), memberLogged: tripLogExists('member') })
+    .from(rides)
+    .where(and(eq(rides.status, 'completed'), lte(rides.logsDueAt, now)));
+  for (const r of due) {
+    const missing = [!r.driverLogged && 'driver log', !r.memberLogged && 'member log'].filter(Boolean).join(' and ');
+    await db
+      .update(rides)
+      .set({ status: 'logged', loggedAt: now, missingLogNote: missing ? `${missing[0]!.toUpperCase()}${missing.slice(1)} missing (72 hours passed)` : null, updatedAt: sql`now()` })
+      .where(and(eq(rides.id, r.id), eq(rides.status, 'completed')));
     await audit(SYSTEM_ACTOR, { action: 'trip.log_timeout', entityType: 'ride', entityId: r.id, details: { missing } });
   }
-  return rides.length;
+  return due.length;
 }
 
 /** Story 1.4 (PSEBC-10): remind 30 days before DBS/insurance expiry; on expiry set status Expired automatically. */
 export async function checkDriverExpiry(now = new Date()): Promise<{ reminded: number; expired: number }> {
   const today = now.toISOString().slice(0, 10);
   const days = await setting('expiry_reminder_days', RULES.expiryReminderDays);
-  const soon = new Date(now.getTime() + days * 86_400_000).toISOString().slice(0, 10);
+  const soon = new Date(now.getTime() + days * DAY).toISOString().slice(0, 10);
 
-  const expired = await query<{ id: string; full_name: string }>(
-    `UPDATE drivers SET status = 'expired', updated_at = now()
-      WHERE status = 'approved' AND LEAST(approved_until, dbs_renewal_date, insurance_expiry) < $1::date
-      RETURNING id, full_name`,
-    [today],
-  );
+  const expired = await db
+    .update(drivers)
+    .set({ status: 'expired', updatedAt: sql`now()` })
+    .where(and(eq(drivers.status, 'approved'), sql`${earliestExpiry} < ${today}::date`))
+    .returning({ id: drivers.id, fullName: drivers.fullName });
   for (const d of expired) {
-    await withTx(async (db) => {
-      await db.query(`UPDATE ride_invites SET status = 'withdrawn', responded_at = now() WHERE driver_id = $1 AND status = 'sent'`, [d.id]);
-      await audit(SYSTEM_ACTOR, { action: 'driver.expire', entityType: 'driver', entityId: d.id }, db);
-      await notifyRole(db, ['safeguarding', 'admin'], { kind: 'driver_expired', title: 'Driver checks expired', body: `${d.full_name}’s checks have expired. They won’t get lift requests until renewed and re-approved.`, link: `/safeguarding/approvals/${d.id}` }, { email: true });
-      await notifyDriver(db, d.id, { kind: 'driver_expired', title: 'Your checks have expired', body: 'You won’t get lift requests until your DBS or insurance is renewed. Please contact the church office.', link: '/driver' });
+    await withTx(async (tx) => {
+      await tx
+        .update(rideInvites)
+        .set({ status: 'withdrawn', respondedAt: sql`now()` })
+        .where(and(eq(rideInvites.driverId, d.id), eq(rideInvites.status, 'sent')));
+      await audit(SYSTEM_ACTOR, { action: 'driver.expire', entityType: 'driver', entityId: d.id }, tx);
+      await notifyRole(tx, ['safeguarding', 'admin'], { kind: 'driver_expired', title: 'Driver checks expired', body: `${d.fullName}’s checks have expired. They won’t get lift requests until renewed and re-approved.`, link: `/safeguarding/approvals/${d.id}` }, { email: true });
+      await notifyDriver(tx, d.id, { kind: 'driver_expired', title: 'Your checks have expired', body: 'You won’t get lift requests until your DBS or insurance is renewed. Please contact the church office.', link: '/driver' });
     });
   }
 
-  const expiring = await query<{ id: string; full_name: string; first_expiry: string; which: string }>(
-    `SELECT id, full_name, LEAST(approved_until, dbs_renewal_date, insurance_expiry)::text AS first_expiry,
-            CASE WHEN insurance_expiry <= dbs_renewal_date THEN 'insurance' ELSE 'DBS check' END AS which
-       FROM drivers
-      WHERE status = 'approved' AND LEAST(approved_until, dbs_renewal_date, insurance_expiry) <= $1::date
-        AND (expiry_reminded_for IS NULL OR expiry_reminded_for <> LEAST(approved_until, dbs_renewal_date, insurance_expiry))`,
-    [soon],
-  );
+  const expiring = await db
+    .select({
+      id: drivers.id,
+      fullName: drivers.fullName,
+      firstExpiry: earliestExpiry,
+      which: sql<string>`CASE WHEN ${drivers.insuranceExpiry} <= ${drivers.dbsRenewalDate} THEN 'insurance' ELSE 'DBS check' END`,
+    })
+    .from(drivers)
+    .where(
+      and(
+        eq(drivers.status, 'approved'),
+        sql`${earliestExpiry} <= ${soon}::date`,
+        or(isNull(drivers.expiryRemindedFor), ne(drivers.expiryRemindedFor, earliestExpiry)),
+      ),
+    );
   for (const d of expiring) {
-    await withTx(async (db) => {
-      await db.query('UPDATE drivers SET expiry_reminded_for = $2 WHERE id = $1', [d.id, d.first_expiry]);
-      await notifyRole(db, ['safeguarding'], { kind: 'driver_expiring', title: 'Driver check expiring soon', body: `${d.full_name}’s ${d.which} expires on ${d.first_expiry}.`, link: `/safeguarding/approvals/${d.id}` }, { email: true });
-      await notifyDriver(db, d.id, { kind: 'driver_expiring', title: 'Your check is expiring soon', body: `Your ${d.which} expires on ${d.first_expiry}. Please give the church office your renewed details.`, link: '/driver' });
-      await audit(SYSTEM_ACTOR, { action: 'driver.expiry_reminder', entityType: 'driver', entityId: d.id, details: { expires: d.first_expiry } }, db);
+    await withTx(async (tx) => {
+      await tx.update(drivers).set({ expiryRemindedFor: d.firstExpiry }).where(eq(drivers.id, d.id));
+      await notifyRole(tx, ['safeguarding'], { kind: 'driver_expiring', title: 'Driver check expiring soon', body: `${d.fullName}’s ${d.which} expires on ${d.firstExpiry}.`, link: `/safeguarding/approvals/${d.id}` }, { email: true });
+      await notifyDriver(tx, d.id, { kind: 'driver_expiring', title: 'Your check is expiring soon', body: `Your ${d.which} expires on ${d.firstExpiry}. Please give the church office your renewed details.`, link: '/driver' });
+      await audit(SYSTEM_ACTOR, { action: 'driver.expiry_reminder', entityType: 'driver', entityId: d.id, details: { expires: d.firstExpiry } }, tx);
     });
   }
   return { reminded: expiring.length, expired: expired.length };
@@ -117,41 +136,67 @@ export async function checkDriverExpiry(now = new Date()): Promise<{ reminded: n
 
 /** Day-before reminder to the member and driver (Should have). */
 export async function sendReminders(now = new Date()): Promise<number> {
-  const rides = await query<RideRow>(
-    `SELECT * FROM rides WHERE status = 'driver_found' AND reminder_sent_at IS NULL AND pickup_at BETWEEN $1 AND $1::timestamptz + interval '24 hours'`,
-    [now],
-  );
-  for (const r of rides) {
-    await withTx(async (db) => {
-      await db.query('UPDATE rides SET reminder_sent_at = now() WHERE id = $1', [r.id]);
-      await notifyMember(db, r.member_id, { kind: 'reminder', title: 'Lift reminder', body: `Reminder: your lift is on ${formatWhen(r.pickup_at)}.`, link: `/member/rides/${r.id}`, rideId: r.id });
-      if (r.driver_id) await notifyDriver(db, r.driver_id, { kind: 'reminder', title: 'Lift reminder', body: `Reminder: you’re driving on ${formatWhen(r.pickup_at)}.`, link: `/driver/trips/${r.id}`, rideId: r.id });
+  const due = await db
+    .select()
+    .from(rides)
+    .where(and(eq(rides.status, 'driver_found'), isNull(rides.reminderSentAt), sql`${rides.pickupAt} BETWEEN ${now} AND ${new Date(now.getTime() + DAY)}`));
+  for (const r of due) {
+    await withTx(async (tx) => {
+      await tx.update(rides).set({ reminderSentAt: sql`now()` }).where(eq(rides.id, r.id));
+      await notifyMember(tx, r.memberId, { kind: 'reminder', title: 'Lift reminder', body: `Reminder: your lift is on ${formatWhen(r.pickupAt)}.`, link: `/member/rides/${r.id}`, rideId: r.id });
+      if (r.driverId) await notifyDriver(tx, r.driverId, { kind: 'reminder', title: 'Lift reminder', body: `Reminder: you’re driving on ${formatWhen(r.pickupAt)}.`, link: `/driver/trips/${r.id}`, rideId: r.id });
     });
   }
-  return rides.length;
+  return due.length;
 }
 
 /** Retention (PRD §9): anonymise personal data once the deletion date passes. Trip logs are kept (6 years). */
 export async function applyRetention(now = new Date()): Promise<number> {
-  const members = await query<{ id: string }>(
-    `UPDATE members SET full_name = 'Former member', preferred_name = 'Former member', address_line = '', town = '', postcode = '',
-            finding_notes = '', phone = '', emergency_name = '', emergency_relationship = '', emergency_phone = '',
-            representative_name = '', representative_phone = '', mobility_aids = '{}', help_needed = '{}', notes_for_driver = '',
-            health_enc = NULL, delete_after = NULL, updated_at = now()
-      WHERE status = 'closed' AND delete_after IS NOT NULL AND delete_after <= $1 RETURNING id`,
-    [now],
-  );
-  const drivers = await query<{ id: string }>(
-    `UPDATE drivers SET full_name = 'Former driver', phone = '', email = '', postcode = '', dbs_number = '', vehicle_reg = '',
-            photo_doc_id = NULL, licence_doc_id = NULL, insurance_doc_id = NULL, delete_after = NULL, updated_at = now()
-      WHERE status = 'closed' AND delete_after IS NOT NULL AND delete_after <= $1 RETURNING id`,
-    [now],
-  );
-  for (const d of drivers) await query('DELETE FROM documents WHERE driver_id = $1', [d.id]);
-  await query(`UPDATE users SET email = 'deleted-' || id || '@invalid', full_name = 'Former user', phone = NULL, mfa_secret = NULL, delete_after = NULL WHERE status = 'closed' AND delete_after IS NOT NULL AND delete_after <= $1`, [now]);
-  for (const m of members) await audit(SYSTEM_ACTOR, { action: 'member.anonymise', entityType: 'member', entityId: m.id });
-  for (const d of drivers) await audit(SYSTEM_ACTOR, { action: 'driver.anonymise', entityType: 'driver', entityId: d.id });
-  return members.length + drivers.length;
+  const due = (table: typeof members | typeof drivers | typeof users) => and(eq(table.status, 'closed'), isNotNull(table.deleteAfter), lte(table.deleteAfter, now));
+  const anonMembers = await db
+    .update(members)
+    .set({
+      fullName: 'Former member',
+      preferredName: 'Former member',
+      addressLine: '',
+      town: '',
+      postcode: '',
+      findingNotes: '',
+      phone: '',
+      emergencyName: '',
+      emergencyRelationship: '',
+      emergencyPhone: '',
+      representativeName: '',
+      representativePhone: '',
+      mobilityAids: [],
+      helpNeeded: [],
+      notesForDriver: '',
+      healthEnc: null,
+      deleteAfter: null,
+      updatedAt: sql`now()`,
+    })
+    .where(due(members))
+    .returning({ id: members.id });
+  const anonDrivers = await db
+    .update(drivers)
+    .set({ fullName: 'Former driver', phone: '', email: '', postcode: '', dbsNumber: '', vehicleReg: '', photoDocId: null, licenceDocId: null, insuranceDocId: null, deleteAfter: null, updatedAt: sql`now()` })
+    .where(due(drivers))
+    .returning({ id: drivers.id });
+  if (anonDrivers.length) {
+    await db.delete(documents).where(
+      inArray(
+        documents.driverId,
+        anonDrivers.map((d) => d.id),
+      ),
+    );
+  }
+  await db
+    .update(users)
+    .set({ email: sql`'deleted-' || ${users.id} || '@invalid'`, fullName: 'Former user', phone: null, mfaSecret: null, deleteAfter: null })
+    .where(due(users));
+  for (const m of anonMembers) await audit(SYSTEM_ACTOR, { action: 'member.anonymise', entityType: 'member', entityId: m.id });
+  for (const d of anonDrivers) await audit(SYSTEM_ACTOR, { action: 'driver.anonymise', entityType: 'driver', entityId: d.id });
+  return anonMembers.length + anonDrivers.length;
 }
 
 export async function runAll(now = new Date()) {

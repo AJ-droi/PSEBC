@@ -10,5 +10,5 @@ export default defineConfig({
   // Bundle the shared workspace package; keep real npm deps external.
   noExternal: ['@psebc/shared'],
   publicDir: false,
-  onSuccess: 'mkdir -p dist/migrations && cp src/db/migrations/*.sql dist/migrations/',
+  onSuccess: 'rm -rf dist/drizzle && cp -r drizzle dist/drizzle',
 });

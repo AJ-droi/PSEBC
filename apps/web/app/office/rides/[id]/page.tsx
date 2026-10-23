@@ -104,7 +104,7 @@ function Inner() {
                 <div className="panel">
                   <strong>Driver log</strong>
                   {data.logs.driver ? (
-                    <KV items={[['As planned', yn(data.logs.driver.went_as_planned)], ['Anything to report', yn(data.logs.driver.anything_to_report)], ['Needs changed', yn(data.logs.driver.needs_changed)]]} />
+                    <KV items={[['As planned', yn(data.logs.driver.wentAsPlanned)], ['Anything to report', yn(data.logs.driver.anythingToReport)], ['Needs changed', yn(data.logs.driver.needsChanged)]]} />
                   ) : (
                     <p className="muted">Not in yet</p>
                   )}
@@ -112,7 +112,7 @@ function Inner() {
                 <div className="panel">
                   <strong>Member log</strong>
                   {data.logs.member ? (
-                    <KV items={[['On time', ON_TIME[data.logs.member.on_time as OnTime] ?? '—'], ['Felt safe', yn(data.logs.member.felt_safe)], ['Rating', String(data.logs.member.rating ?? '—')], ['Call back', yn(data.logs.member.callback_requested)]]} />
+                    <KV items={[['On time', ON_TIME[data.logs.member.onTime as OnTime] ?? '—'], ['Felt safe', yn(data.logs.member.feltSafe)], ['Rating', String(data.logs.member.rating ?? '—')], ['Call back', yn(data.logs.member.callbackRequested)]]} />
                   ) : (
                     <p className="muted">Not in yet</p>
                   )}
