@@ -59,7 +59,9 @@ No member name, address, phone or health information reaches a driver in this re
    * `DATA_ENCRYPTION_KEY`: `openssl rand -base64 32` (keep a copy in the church password manager)
    * `WEB_ORIGIN`: `https://psebc-web.onrender.com` (your web service's address)
    * `API_URL`: `https://psebc-api.onrender.com` (your API's address, no trailing slash)
-   * `VAPID_*`: optional. Leave blank to switch phone alerts off for the demo.
+
+   Phone alerts are off in this release; the keys aren't in `render.yaml`, so Render won't ask for them.
+   To switch them on later, see `docs/deployment.md` § 6 and add the two keys in the Render dashboard.
 
    If Render gives the services different addresses (for example `psebc-api-x1y2.onrender.com`), update
    `WEB_ORIGIN` and `API_URL`, then **redeploy `psebc-web`**. `API_URL` is read when the web app is built.

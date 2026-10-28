@@ -36,11 +36,9 @@ services:
         value: console
       - key: NOTIFY_SMS_DRIVER
         value: console
-      # Phone alerts: generate once with `npx web-push generate-vapid-keys` (optional for the demo)
-      - key: VAPID_PUBLIC_KEY
-        sync: false
-      - key: VAPID_PRIVATE_KEY
-        sync: false
+      # Phone alerts (Web Push) are off until VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY are set.
+      # They are left out here on purpose, so the Blueprint doesn't ask for them. To switch alerts on later,
+      # run `npx web-push generate-vapid-keys` and add both keys in the Render dashboard (psebc-api → Environment).
       - key: VAPID_SUBJECT
         value: mailto:office@example.org
       - key: REPORTS_SHOW_MEMBER_NAMES
