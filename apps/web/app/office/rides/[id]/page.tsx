@@ -9,6 +9,7 @@ import { DesktopShell } from '@/components/shells';
 import { ErrorBox, KV, Loading, RideChip, Tags } from '@/components/ui';
 import { fetcher, post } from '@/lib/api';
 import { time, when } from '@/lib/format';
+import { useRelease } from '@/lib/release';
 import type { MemberRideView } from '@/lib/types';
 
 const yn = (v: unknown) => (v === true ? 'Yes' : v === false ? 'No' : '—');
@@ -30,6 +31,7 @@ function Inner() {
   const booked = useSearchParams().get('booked');
   const { data, error, mutate } = useSWR<MemberRideView>(`/rides/${id}`, fetcher, { refreshInterval: 30_000 });
   const [msg, setMsg] = useState<string | null>(null);
+  const { has } = useRelease();
   if (error) return <ErrorBox error={error} />;
   if (!data) return <Loading />;
   const r = data.ride;
@@ -163,7 +165,7 @@ function Inner() {
               Rebook for a new date
             </Link>
           ) : null}
-          {['driver_found', 'completed', 'logged'].includes(r.status) ? (
+          {has('tripLogging') && ['driver_found', 'completed', 'logged'].includes(r.status) ? (
             <Link className="btn btn-danger block" href={`/concern/${id}?back=/office/rides/${id}`}>
               Report a concern
             </Link>

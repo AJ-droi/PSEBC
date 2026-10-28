@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { ah, parse, uuidParam } from '../../lib/http';
 import { pageFrom } from '../../lib/pagination';
 import { forbidden } from '../../lib/errors';
+import { requireFeature } from '../../lib/release';
 import { currentUser, requireAuth, requireRole } from '../../middleware/auth';
 import { actorFrom } from '../../services/audit';
 import { flushSoon } from '../../services/notify';
@@ -29,7 +30,7 @@ ridesRouter.get(
     const memberId = user.role === 'member' ? user.memberId : String(req.query.memberId ?? '');
     if (!memberId) throw forbidden();
     svc.assertCanActForMember(user, memberId);
-    res.json(await memberRides(memberId));
+    res.json(await memberRides(memberId, user.role === 'member' ? 'member' : 'office'));
   }),
 );
 
@@ -43,7 +44,7 @@ ridesRouter.get(
     if (!memberId) throw forbidden();
     svc.assertCanActForMember(user, memberId);
     const page = pageFrom(req);
-    const { rows, total } = await memberRideHistory(memberId, page);
+    const { rows, total } = await memberRideHistory(memberId, page, user.role === 'member' ? 'member' : 'office');
     res.json({ rides: rows, pagination: page.meta(total) });
   }),
 );
@@ -99,7 +100,7 @@ ridesRouter.post(
   }),
 );
 
-// ---- Driver actions -------------------------------------------------------
+// ---- Driver actions (accept/decline/withdraw = Epic 3; progress and logs = Epic 5) -------------------------------------------------------
 
 ridesRouter.post(
   '/:id/accept',
@@ -135,6 +136,7 @@ ridesRouter.post(
 
 ridesRouter.post(
   '/:id/progress',
+  requireFeature('tripLogging'),
   requireRole('driver'),
   ah(async (req, res) => {
     const { event } = parse(tripProgressSchema, req.body);
@@ -146,6 +148,7 @@ ridesRouter.post(
 
 ridesRouter.post(
   '/:id/logs/driver',
+  requireFeature('tripLogging'),
   requireRole('driver'),
   ah(async (req, res) => {
     const input = parse(driverLogSchema, req.body);
@@ -156,6 +159,7 @@ ridesRouter.post(
 
 ridesRouter.post(
   '/:id/logs/member',
+  requireFeature('tripLogging'),
   requireRole('member', 'coordinator', 'admin'),
   ah(async (req, res) => {
     const input = parse(memberLogSchema, req.body);

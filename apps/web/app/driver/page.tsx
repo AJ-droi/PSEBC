@@ -13,7 +13,8 @@ import { signOut } from '@/lib/session';
 interface Home {
   driver: { firstName: string; status: string; validTo: string | null; loneWorkingAcknowledged: boolean };
   invites: { id: string; pickupAt: string; pickupArea: string; destination: string; returnAt: string | null }[];
-  trips: { id: string; status: RideStatus; displayStatus: RideDisplayStatus; pickupAt: string; memberName: string; town: string; needsLog: boolean }[];
+  /** memberName is null until member details are shared with drivers (Epic 4). */
+  trips: { id: string; status: RideStatus; displayStatus: RideDisplayStatus; pickupAt: string; memberName: string | null; pickupArea: string; town: string; needsLog: boolean }[];
 }
 
 export default function DriverHome() {
@@ -96,7 +97,7 @@ function Inner() {
           <Link key={t.id} className="card" href={t.needsLog ? `/driver/trips/${t.id}/log` : `/driver/trips/${t.id}`}>
             <div className="between">
               <strong style={{ fontSize: '1.125rem' }}>
-                {dayShort(t.pickupAt)} · {t.memberName}
+                {dayShort(t.pickupAt)} · {t.memberName ?? t.pickupArea}
               </strong>
               {t.displayStatus === 'incident' ? <RideChip status="incident" /> : t.needsLog ? <span className="chip chip-invites_sent">Log needed</span> : t.status === 'driver_found' ? <span className="chip chip-driver_found">Booked</span> : <span className="chip chip-logged">Logged</span>}
             </div>

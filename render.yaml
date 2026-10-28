@@ -1,5 +1,8 @@
-# Render Blueprint for the API (free tier, Frankfurt = EU hosting, PRD §9 data location).
-# The web app goes on Vercel (see docs/deployment.md). Database: Neon (London / eu-west-2).
+# Render Blueprint — API + web app, free tier, Frankfurt (EU hosting, PRD §9 data location).
+# Database: Neon (London / eu-west-2). See docs/release-epics-1-3.md for the step-by-step.
+#
+# ENABLED_EPICS decides what this deployment switches on. "1-3" = the Epics 1–3 demo
+# (onboarding, booking, matching). Change it to "1-4", … or "all" and redeploy the API to release more.
 services:
   - type: web
     name: psebc-api
@@ -14,12 +17,15 @@ services:
         value: production
       - key: NODE_VERSION
         value: '22'
+      - key: ENABLED_EPICS
+        value: '1-3'
       - key: DATABASE_URL
         sync: false
       - key: JWT_SECRET
         generateValue: true
       - key: DATA_ENCRYPTION_KEY
         sync: false
+      # The web app's address, e.g. https://psebc-web.onrender.com
       - key: WEB_ORIGIN
         sync: false
       - key: RUN_SCHEDULER
@@ -30,7 +36,7 @@ services:
         value: console
       - key: NOTIFY_SMS_DRIVER
         value: console
-      # Phone alerts: generate once with `npx web-push generate-vapid-keys`
+      # Phone alerts: generate once with `npx web-push generate-vapid-keys` (optional for the demo)
       - key: VAPID_PUBLIC_KEY
         sync: false
       - key: VAPID_PRIVATE_KEY
@@ -39,3 +45,25 @@ services:
         value: mailto:office@example.org
       - key: REPORTS_SHOW_MEMBER_NAMES
         value: 'false'
+
+  # The Next.js PWA. The browser only talks to this service; /api/* is proxied to psebc-api,
+  # so the session cookie stays first-party. It reads which epics are live from the API.
+  - type: web
+    name: psebc-web
+    runtime: node
+    region: frankfurt
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build -w @psebc/web
+    startCommand: npm start -w @psebc/web
+    healthCheckPath: /login
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: '22'
+      - key: NEXT_TELEMETRY_DISABLED
+        value: '1'
+      # The API's public address, no trailing slash, e.g. https://psebc-api.onrender.com
+      # Used at build time for the /api proxy: after changing it, redeploy the web service.
+      - key: API_URL
+        sync: false

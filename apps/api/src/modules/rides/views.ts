@@ -15,12 +15,16 @@ import { db } from '../../db/client';
 import { tripLogExists } from '../../db/sql';
 import { drivers, members, rideInvites, rides, tripLogs, type Member, type Ride } from '../../db/schema';
 import { forbidden, notFound } from '../../lib/errors';
+import { featureOn } from '../../lib/release';
 import type { SessionUser } from '../../middleware/auth';
 import { audit, type Actor } from '../../services/audit';
 import { getMember, health } from '../members/repo';
 import { getRide } from './repo';
 
 const DRIVER_VISIBLE_TO_MEMBER = ['driver_found', 'completed', 'logged', 'signed_off'];
+
+/** Story 4.1: the member sees who is coming only once Epic 4 is live. The church office always can. */
+const memberSeesDriver = (status: string) => DRIVER_VISIBLE_TO_MEMBER.includes(status) && featureOn('tripDetails');
 
 /** What the member and driver both see about needs — labels only, no health (invite + "David knows"). */
 export function needsSummary(m: Pick<Member, 'mobilityAids' | 'helpNeeded' | 'vehicleRequirement'>, ride?: Pick<Ride, 'companion'>): string[] {
@@ -100,12 +104,12 @@ export async function rideView(user: SessionUser, actor: Actor, rideId: string) 
         signedOffAt: ride.signedOffAt,
       },
       member: { id: member.id, fullName: member.fullName, preferredName: member.preferredName, phone: isOwnMember ? undefined : member.phone },
-      driver: DRIVER_VISIBLE_TO_MEMBER.includes(ride.status) ? await driverCard(ride.driverId) : null,
+      driver: (isOwnMember ? memberSeesDriver(ride.status) : DRIVER_VISIBLE_TO_MEMBER.includes(ride.status)) ? await driverCard(ride.driverId) : null,
       driverKnows: needsSummary(member, ride),
       canCancel: isCancellable(ride.status, ride.pickupAt) && user.role !== 'safeguarding',
       canRebook: ride.status === 'cancelled' && user.role !== 'safeguarding',
       memberLogDone: !!logs.member,
-      canLog: ['completed', 'logged'].includes(ride.status) && !logs.member && user.role !== 'safeguarding',
+      canLog: featureOn('tripLogging') && ['completed', 'logged'].includes(ride.status) && !logs.member && user.role !== 'safeguarding',
     };
     if (isOwnMember) return base;
     const invites = await db
@@ -120,7 +124,10 @@ export async function rideView(user: SessionUser, actor: Actor, rideId: string) 
   // ---- Driver ------------------------------------------------------------
   if (user.role === 'driver' && user.driverId) {
     if (ride.driverId === user.driverId) {
-      if (DRIVER_DETAIL_ACCESS.includes(ride.status)) return driverTripView(ride, actor);
+      if (DRIVER_DETAIL_ACCESS.includes(ride.status)) {
+        // Story 4.2 (Epic 4) shares the member's personal details. Before that, the driver gets the invite-level view.
+        return featureOn('tripDetails') ? driverTripView(ride, actor) : driverConfirmedView(ride);
+      }
       // Story 4.3: after sign-off the driver keeps only the trip record.
       return {
         view: 'driver_record' as const,
@@ -167,6 +174,24 @@ async function inviteView(ride: Ride, inviteStatus: string) {
   };
 }
 
+/**
+ * Epics 1–3 release: the driver has accepted but member details (Epic 4) aren't shared in the app yet.
+ * Same data as the invite (story 3.2) — no name, address, phone or health — plus "hand back".
+ */
+async function driverConfirmedView(ride: Ride) {
+  const m = (await getMember(ride.memberId))!;
+  return {
+    view: 'driver_confirmed' as const,
+    ride: {
+      ...rideCore(ride),
+      pickupArea: `${postcodeArea(m.postcode)}, ${m.town}`,
+    },
+    needs: needsSummary(m, ride),
+    message: 'You’ve got this lift. The church office will give you the member’s details before the day.',
+    canWithdraw: ride.status === 'driver_found' && ride.pickupAt > new Date(),
+  };
+}
+
 /** Story 4.2: after acceptance the driver sees name, address, phone, emergency contact and consented health notes. */
 async function driverTripView(ride: Ride, actor: Actor) {
   const m = (await getMember(ride.memberId))!;
@@ -203,7 +228,7 @@ async function driverTripView(ride: Ride, actor: Actor) {
   };
 }
 
-export async function memberRides(memberId: string) {
+export async function memberRides(memberId: string, viewer: 'member' | 'office' = 'member') {
   const rows = await db
     .select({ ride: rides, driverName: drivers.fullName, memberLogged: tripLogExists('member') })
     .from(rides)
@@ -212,7 +237,7 @@ export async function memberRides(memberId: string) {
     .orderBy(asc(rides.pickupAt));
   const toItem = ({ ride: r, driverName, memberLogged }: (typeof rows)[number]) => ({
     ...rideCore(r),
-    driverFirstName: driverName && DRIVER_VISIBLE_TO_MEMBER.includes(r.status) ? driverName.split(' ')[0] : null,
+    driverFirstName: driverName && (viewer === 'member' ? memberSeesDriver(r.status) : DRIVER_VISIBLE_TO_MEMBER.includes(r.status)) ? driverName.split(' ')[0] : null,
     needsLog: ['completed', 'logged'].includes(r.status) && !memberLogged,
   });
   const soon = new Date(Date.now() - 6 * 3_600_000);
@@ -239,7 +264,7 @@ export async function driverHome(driverId: string) {
     .where(and(eq(rideInvites.driverId, driverId), eq(rideInvites.status, 'sent'), inArray(rides.status, ['invites_sent', 'unmatched']), gt(rides.pickupAt, new Date())))
     .orderBy(asc(rides.pickupAt));
   const trips = await db
-    .select({ ride: rides, preferredName: members.preferredName, town: members.town, driverLogged: tripLogExists('driver') })
+    .select({ ride: rides, preferredName: members.preferredName, postcode: members.postcode, town: members.town, driverLogged: tripLogExists('driver') })
     .from(rides)
     .innerJoin(members, eq(members.id, rides.memberId))
     .where(and(eq(rides.driverId, driverId), inArray(rides.status, ['driver_found', 'completed', 'logged'])))
@@ -254,19 +279,21 @@ export async function driverHome(driverId: string) {
       destination: r.destination,
       returnAt: r.returnNeeded ? r.returnAt : null,
     })),
-    trips: trips.map(({ ride: r, preferredName, town, driverLogged }) => ({
+    trips: trips.map(({ ride: r, preferredName, postcode, town, driverLogged }) => ({
       id: r.id,
       ...statusFields(r),
       pickupAt: r.pickupAt,
-      memberName: preferredName,
+      // The member's name reaches the driver with the rest of their details (Epic 4); before that, the area only.
+      memberName: featureOn('tripDetails') ? preferredName : null,
+      pickupArea: `${postcodeArea(postcode)}, ${town}`,
       town,
-      needsLog: ['completed', 'logged'].includes(r.status) && !driverLogged,
+      needsLog: featureOn('tripLogging') && ['completed', 'logged'].includes(r.status) && !driverLogged,
     })),
   };
 }
 
 /** Every lift for one member, newest first, one page at a time (office member page). */
-export async function memberRideHistory(memberId: string, page: { limit: number; offset: number }) {
+export async function memberRideHistory(memberId: string, page: { limit: number; offset: number }, viewer: 'member' | 'office' = 'office') {
   const rows = await db
     .select({ ride: rides, driverName: drivers.fullName })
     .from(rides)
@@ -279,7 +306,7 @@ export async function memberRideHistory(memberId: string, page: { limit: number;
   return {
     rows: rows.map(({ ride: r, driverName }) => ({
       ...rideCore(r),
-      driverFirstName: driverName && DRIVER_VISIBLE_TO_MEMBER.includes(r.status) ? driverName.split(' ')[0] : null,
+      driverFirstName: driverName && (viewer === 'member' ? memberSeesDriver(r.status) : DRIVER_VISIBLE_TO_MEMBER.includes(r.status)) ? driverName.split(' ')[0] : null,
     })),
     total,
   };

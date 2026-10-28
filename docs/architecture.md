@@ -176,3 +176,21 @@ erDiagram
 | JWT cookie + DB lookup per request | Stateless scaling with instant revocation | very high traffic → short-lived cache |
 | SMS/email via webhook adapter | Church's provider is undecided (M365 dependency, PRD §11) | provider chosen |
 | Hand-written service worker | Full control of the privacy rule "no personal data cached on phones" | push notifications are added |
+
+## Releases and the epic switch
+
+The product ships in slices that follow the Jira epics, but there is only one codebase and one branch of
+logic. `ENABLED_EPICS` (API environment) is parsed by `packages/shared/src/release.ts` into feature flags:
+`tripDetails` (Epic 4), `tripLogging` (5), `signOff` (6) and `reports` (7). Epics 1–3 are always on.
+
+* The **API** is the enforcement point. `requireFeature()` (`apps/api/src/lib/release.ts`) guards whole
+  routers and single routes, and returns `404 not_in_release`. Views drop data that belongs to a switched-off
+  epic: for example, before Epic 4 the driver gets the `driver_confirmed` view, which has no member
+  personal data.
+* The **web app** reads `GET /api/release` (public, no personal data). It hides navigation and wraps
+  switched-off screens in `<FeatureGate>`, mostly through route-segment `layout.tsx` files, so the screens
+  themselves don't change.
+* Prerequisites are checked at start-up (5 needs 4, 6 needs 5), so a bad setting fails loudly.
+
+This keeps a demo release and the full product on the same tested code. CI runs the journey tests for the
+full release and for the Epics 1–3 release.

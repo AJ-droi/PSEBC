@@ -3,8 +3,9 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, type ReactNode } from 'react';
 import useSWR from 'swr';
-import type { Role } from '@psebc/shared';
+import type { Feature, Role } from '@psebc/shared';
 import { fetcher } from '@/lib/api';
+import { useRelease } from '@/lib/release';
 import { homeFor, signOut, useMe, type Me } from '@/lib/session';
 import { Brand, Loading } from './ui';
 import { Bell } from './icons';
@@ -86,17 +87,17 @@ export function MobileShell({ roles, children, top = true, label }: { roles: Rol
   );
 }
 
-const NAV: Record<string, { href: string; label: string; roles: Role[] }[]> = {
+const NAV: Record<string, { href: string; label: string; roles: Role[]; feature?: Feature }[]> = {
   office: [
     { href: '/office', label: 'Lifts', roles: ['coordinator', 'admin'] },
     { href: '/office/members', label: 'Members', roles: ['coordinator', 'admin'] },
     { href: '/office/drivers', label: 'Drivers', roles: ['coordinator', 'admin'] },
-    { href: '/office/reports', label: 'Reports', roles: ['admin'] },
+    { href: '/office/reports', label: 'Reports', roles: ['admin'], feature: 'reports' },
     { href: '/office/users', label: 'Logins', roles: ['admin'] },
-    { href: '/safeguarding/incidents', label: 'Incidents', roles: ['safeguarding'] },
-    { href: '/safeguarding', label: 'Sign-off', roles: ['safeguarding'] },
+    { href: '/safeguarding/incidents', label: 'Incidents', roles: ['safeguarding'], feature: 'tripLogging' },
+    { href: '/safeguarding', label: 'Sign-off', roles: ['safeguarding'], feature: 'signOff' },
     { href: '/safeguarding/approvals', label: 'Driver approvals', roles: ['safeguarding'] },
-    { href: '/office/reports', label: 'Reports', roles: ['safeguarding'] },
+    { href: '/office/reports', label: 'Reports', roles: ['safeguarding'], feature: 'reports' },
     { href: '/safeguarding/audit', label: 'Audit trail', roles: ['safeguarding'] },
   ],
 };
@@ -112,6 +113,7 @@ const ROLE_LABEL: Record<Role, string> = {
 /** Desktop layout for the church office, admin and safeguarding (design: top bar + nav). */
 export function DesktopShell({ roles, children }: { roles: Role[]; children: (me: Me) => ReactNode }) {
   const pathname = usePathname();
+  const { has, release } = useRelease();
   return (
     <div className="desk">
       <a className="skip" href="#main">
@@ -119,7 +121,7 @@ export function DesktopShell({ roles, children }: { roles: Role[]; children: (me
       </a>
       <RoleGate roles={roles}>
         {(me) => {
-          const items = NAV.office!.filter((n) => n.roles.includes(me.user.role));
+          const items = NAV.office!.filter((n) => n.roles.includes(me.user.role) && (!n.feature || has(n.feature)));
           const area = me.user.role === 'safeguarding' ? 'Safeguarding' : me.user.role === 'admin' ? 'Admin' : 'Church office';
           const current = items
             .map((i) => i.href)
@@ -139,6 +141,11 @@ export function DesktopShell({ roles, children }: { roles: Role[]; children: (me
                   ))}
                 </nav>
                 <div className="d-user">
+                  {release?.label ? (
+                    <span className="chip chip-neutral" title="Parts of the app switched on in this release">
+                      {release.label}
+                    </span>
+                  ) : null}
                   <NotificationsLink />
                   <span>
                     {me.user.fullName} · {ROLE_LABEL[me.user.role]}

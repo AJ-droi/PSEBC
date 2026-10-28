@@ -21,6 +21,14 @@ packages/
 docs/           Architecture, acceptance-criteria check, deployment, admin guide
 ```
 
+## Releases: switching epics on
+
+All seven epics are in this codebase. The API setting `ENABLED_EPICS` decides which are live in a
+deployment: `all` (the default), or for example `1-3`. Switched-off features are refused by the API and
+hidden in the app. The first public cut is the **Epics 1–3 demo** (onboarding, booking, matching). See
+[docs/release-epics-1-3.md](docs/release-epics-1-3.md) for what it includes, the demo script and the
+Render deployment.
+
 ## Run it locally
 
 Prerequisites: Node 22+, a Postgres database (a free Neon project, or local Postgres 15+).
@@ -69,8 +77,8 @@ Commit the generated files in `apps/api/drizzle/` with the schema change.
 ## Tests
 
 ```bash
-npm test -w @psebc/shared   # 36 unit tests: matching rules, ride status machine, UK phone numbers
-TEST_DATABASE_URL=postgresql://... npm test -w @psebc/api   # 31 journey tests on a real database
+npm test -w @psebc/shared   # 42 unit tests: matching rules, ride status machine, UK phone numbers, release switch
+TEST_DATABASE_URL=postgresql://... npm test -w @psebc/api   # 38 journey tests on a real database (full release + Epics 1–3 release)
 npm run typecheck && npm run build
 ```
 
@@ -83,4 +91,5 @@ CI runs everything on each push (`.github/workflows/ci.yml`).
 - [docs/architecture.md](docs/architecture.md) — system design, data model, security, scaling
 - [docs/acceptance-criteria.md](docs/acceptance-criteria.md) — every PRD story / Jira key checked against the build
 - [docs/deployment.md](docs/deployment.md) — Neon + Render + Vercel on free tiers, UK/EU hosting
+- [docs/release-epics-1-3.md](docs/release-epics-1-3.md) — the Epics 1–3 demo release: scope, Render deploy, demo script
 - [docs/admin-guide.md](docs/admin-guide.md) — short guide for the volunteer who runs it (PRD §10 maintainability)

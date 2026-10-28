@@ -1,19 +1,22 @@
 'use client';
 import useSWR from 'swr';
+import { FeatureGate } from '@/components/feature-gate';
 import { DesktopShell } from '@/components/shells';
 import { SignoffWorkspace } from '@/components/signoff';
 import { fetcher } from '@/lib/api';
 
 export default function Safeguarding() {
   return (
-    <DesktopShell roles={['safeguarding']}>
-      {() => (
-        <>
-          <Summary />
-          <SignoffWorkspace />
-        </>
-      )}
-    </DesktopShell>
+    <FeatureGate feature="signOff" redirectTo="/safeguarding/approvals">
+      <DesktopShell roles={['safeguarding']}>
+        {() => (
+          <>
+            <Summary />
+            <SignoffWorkspace />
+          </>
+        )}
+      </DesktopShell>
+    </FeatureGate>
   );
 }
 

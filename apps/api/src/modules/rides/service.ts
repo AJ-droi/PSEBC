@@ -14,6 +14,7 @@ import {
 import { withTx, type Tx } from '../../db/client';
 import { drivers, rideInvites, rides, tripLogs, type Ride } from '../../db/schema';
 import { AppError, badRequest, conflict, forbidden, notFound } from '../../lib/errors';
+import { featureOn } from '../../lib/release';
 import { addHours, formatWhen } from '../../lib/time';
 import { audit, type Actor } from '../../services/audit';
 import { notifyDriver, notifyMember, notifyRole, notifyUsers } from '../../services/notify';
@@ -135,7 +136,10 @@ export async function acceptInvite(user: SessionUser, actor: Actor, rideId: stri
     await notifyMember(tx, ride.memberId, {
       kind: 'driver_found',
       title: 'Your driver is booked',
-      body: `${firstName} will pick you up on ${formatWhen(ride.pickupAt)} in a ${driver.vehicleColour} ${driver.vehicleMakeModel} (${driver.vehicleReg}).`,
+      // Driver name and car are shared with the member in Epic 4 (story 4.1); until then, confirm only.
+      body: featureOn('tripDetails')
+        ? `${firstName} will pick you up on ${formatWhen(ride.pickupAt)} in a ${driver.vehicleColour} ${driver.vehicleMakeModel} (${driver.vehicleReg}).`
+        : `A volunteer driver has said yes to your lift on ${formatWhen(ride.pickupAt)}. The church office will be in touch before the day.`,
       link: `/member/rides/${rideId}`,
       rideId,
     });

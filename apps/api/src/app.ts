@@ -9,6 +9,7 @@ import { env } from './config/env';
 import { sql } from 'drizzle-orm';
 import { db } from './db/client';
 import { logger } from './lib/logger';
+import { release, requireFeature } from './lib/release';
 import { errorHandler, notFoundHandler } from './middleware/error';
 import { loadUser } from './middleware/auth';
 import { authRouter } from './modules/auth/routes';
@@ -51,6 +52,11 @@ export function createApp() {
     }
   });
 
+  // Which epics this deployment has switched on, so the web app can hide what isn't live. Public, no personal data.
+  app.get('/api/release', (_req, res) => {
+    res.json(release());
+  });
+
   app.use('/api', loadUser);
   // Fair-use limit per signed-in person (or per IP when signed out): stops a stuck tab or
   // a script from flooding the API. Generous for normal use — screens poll every 20–60 s.
@@ -70,9 +76,9 @@ export function createApp() {
   app.use('/api/members', membersRouter);
   app.use('/api/drivers', driversRouter);
   app.use('/api/rides', ridesRouter);
-  app.use('/api/concerns', concernsRouter);
-  app.use('/api/safeguarding', signoffRouter);
-  app.use('/api/reports', reportsRouter);
+  app.use('/api/concerns', requireFeature('tripLogging'), concernsRouter); // Epic 5 (5.2/5.3)
+  app.use('/api/safeguarding', requireFeature('signOff'), signoffRouter); // Epic 6
+  app.use('/api/reports', requireFeature('reports'), reportsRouter); // Epic 7
   app.use('/api/notifications', notificationsRouter);
   app.use('/api/documents', documentsRouter);
   app.use('/api/admin', adminRouter);

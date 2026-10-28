@@ -84,7 +84,16 @@ export interface DriverRecordView {
   message: string;
 }
 
-export type RideView = MemberRideView | InviteView | DriverTripView | DriverRecordView;
+/** Epics 1–3 release: the driver has the lift, but member details (Epic 4) aren't shared in the app yet. */
+export interface DriverConfirmedView {
+  view: 'driver_confirmed';
+  ride: RideCore & { pickupArea: string };
+  needs: string[];
+  message: string;
+  canWithdraw: boolean;
+}
+
+export type RideView = MemberRideView | InviteView | DriverTripView | DriverRecordView | DriverConfirmedView;
 
 export interface MemberProfile {
   id: string;
