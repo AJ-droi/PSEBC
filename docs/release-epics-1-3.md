@@ -73,7 +73,26 @@ No member name, address, phone or health information reaches a driver in this re
 Free Render services sleep after 15 minutes idle. The first visit after a sleep takes about a minute, so
 open the app a few minutes before the demo.
 
-## Push this version
+## Or: one Render service for both (fewer free hours)
+
+Instead of the Blueprint, create a single **New → Web Service** that runs the API and the web app together.
+It uses half the free hours, but both apps share the free instance's 512 MB of memory.
+
+| Field | Value |
+| --- | --- |
+| Branch / Root Directory | `release/epics-1-3` / *(empty)* |
+| Build Command | `npm ci --include=dev && npm run build` |
+| Start Command | `npm start` |
+| Health Check Path | `/api/health` |
+
+Environment: `NODE_ENV=production`, `NODE_VERSION=22`, `ENABLED_EPICS=1-3`, `API_URL=http://localhost:4100`,
+`WEB_ORIGIN` (the service's own address), `DATABASE_URL`, `JWT_SECRET`, `DATA_ENCRYPTION_KEY` and `JOBS_SECRET`.
+**Don't set `PORT`**: Render assigns it to the web app. The API takes its port from `API_URL`.
+
+`npm start` runs `scripts/start-all.mjs`. If either app stops, it stops the other, so Render restarts the
+whole service. If `PORT` and `API_URL` would clash, it refuses to start and says why.
+
+
 
 ```bash
 git remote add origin https://github.com/<you>/psebc-transport.git   # once

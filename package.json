@@ -12,6 +12,7 @@
     "dev:api": "npm run dev --workspace @psebc/api",
     "dev:web": "npm run dev --workspace @psebc/web",
     "build": "npm run build --workspace @psebc/shared && npm run build --workspace @psebc/api && npm run build --workspace @psebc/web",
+    "start": "node scripts/start-all.mjs",
     "db:migrate": "npm run db:migrate --workspace @psebc/api",
     "db:seed": "npm run db:seed --workspace @psebc/api",
     "typecheck": "npm run typecheck --workspaces --if-present",
