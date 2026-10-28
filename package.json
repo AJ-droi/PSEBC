@@ -2,7 +2,7 @@
   "name": "psebc-transport",
   "private": true,
   "version": "1.0.0",
-  "description": "PSEBC Lifts \u2014 volunteer transport PWA for Princes Street Church",
+  "description": "PSEBC Lifts — volunteer transport PWA for Princes Street Church",
   "workspaces": [
     "packages/*",
     "apps/*"
@@ -19,5 +19,8 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.4"
   }
 }
