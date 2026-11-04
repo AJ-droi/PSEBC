@@ -9,7 +9,7 @@ import type { SessionUser } from '../middleware/auth';
  */
 export interface AuditEntry {
   action: string;
-  entityType: 'member' | 'driver' | 'ride' | 'concern' | 'user' | 'document' | 'report' | 'system';
+  entityType: 'member' | 'driver' | 'ride' | 'ride_series' | 'concern' | 'user' | 'document' | 'report' | 'system';
   entityId?: string | null;
   details?: Record<string, unknown>;
 }

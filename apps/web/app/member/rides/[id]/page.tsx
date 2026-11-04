@@ -6,6 +6,7 @@ import useSWR from 'swr';
 import { CANCEL_REASONS, type CancelReason, formatUkPhone, telHref } from '@psebc/shared';
 import { RoleGate } from '@/components/shells';
 import { BackBar, ErrorBox, Loading, RideChip, Tags } from '@/components/ui';
+import { SeriesPanel } from '@/components/series';
 import { Check, Phone } from '@/components/icons';
 import { fetcher } from '@/lib/api';
 import { dayLong, time, when } from '@/lib/format';
@@ -84,6 +85,45 @@ function RideStatus() {
               Tell us how the trip went
             </Link>
           ) : null}
+          <SeriesPanel series={data.series} currentId={r.id} hrefFor={(x) => `/member/rides/${x}`} />
+          {callOffice}
+          {data.canCancel ? (
+            <Link className="btn btn-danger block" href={`/member/rides/${r.id}/cancel`}>
+              Cancel this lift
+            </Link>
+          ) : null}
+        </main>
+      </>
+    );
+  }
+
+  // ---- Driver confirmed, details not shared in this release (Epics 1–3) ----
+  if (r.status === 'driver_found') {
+    return (
+      <>
+        <BackBar href="/member" label="Back to my lifts" crumb="My lifts" />
+        <main className="screen" id="main">
+          <div>
+            <span className="chip chip-driver_found">
+              <Check /> &nbsp;Lift confirmed
+            </span>
+            <h1 className="title" style={{ marginTop: 12 }}>
+              A driver has said yes
+            </h1>
+            <p className="lede">
+              {dayLong(r.pickupAt)}, {time(r.pickupAt)} to {r.destination.replace('Princes Street Church: ', 'Princes Street Church, ')}.
+              {r.returnNeeded && r.returnAt ? ` Lift home at ${time(r.returnAt)}.` : ''}
+            </p>
+          </div>
+          <div className="panel">
+            <div className="h3">What happens next</div>
+            <p>The church office will tell you who is driving before the day.</p>
+          </div>
+          <div className="panel">
+            <div className="h3">Your driver will know</div>
+            <Tags items={data.driverKnows} />
+          </div>
+          <SeriesPanel series={data.series} currentId={r.id} hrefFor={(x) => `/member/rides/${x}`} />
           {callOffice}
           {data.canCancel ? (
             <Link className="btn btn-danger block" href={`/member/rides/${r.id}/cancel`}>
@@ -111,6 +151,7 @@ function RideStatus() {
               Book again for a new date
             </Link>
           ) : null}
+          <SeriesPanel series={data.series} currentId={r.id} hrefFor={(x) => `/member/rides/${x}`} />
           {callOffice}
         </main>
       </>
@@ -168,6 +209,7 @@ function RideStatus() {
           </li>
         </ol>
         <p className="muted">{unmatched ? 'The church office has been told and will call you.' : 'If no driver says yes in time, the church office will call you.'}</p>
+        <SeriesPanel series={data.series} currentId={r.id} hrefFor={(x) => `/member/rides/${x}`} />
         <Link className="btn btn-secondary block" href="/member">
           Back to my lifts
         </Link>

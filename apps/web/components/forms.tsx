@@ -17,6 +17,7 @@ import { Alert } from './icons';
 export function CancelRide({ rideId, backHref, doneHref, startWithRebook }: { rideId: string; backHref: string; doneHref: (newId?: string) => string; startWithRebook?: boolean }) {
   const { data, error: loadError, mutate } = useSWR<MemberRideView>(`/rides/${rideId}`, fetcher);
   const [part, setPart] = useState<CancelPart>('both');
+  const [scope, setScope] = useState<'this' | 'series'>('this');
   const [reason, setReason] = useState<CancelReason | null>(null);
   const [mode, setMode] = useState<'cancel' | 'rebook'>(startWithRebook ? 'rebook' : 'cancel');
   const dates = useMemo(() => upcomingDates(), []);
@@ -33,12 +34,15 @@ export function CancelRide({ rideId, backHref, doneHref, startWithRebook }: { ri
   const driver = data.driver?.firstName;
   const pickupHHMM = pickup ?? londonHHMM(r.pickupAt);
   const returnHHMM = ret ?? (r.returnAt ? londonHHMM(r.returnAt) : '12:30');
+  const laterInSeries = Math.max(0, (data.series?.cancellableFromHere ?? 1) - 1);
+  const cancelAll = scope === 'series' && part === 'both';
 
   async function cancel(thenRebook: boolean) {
     if (!reason) return;
-    const ok = await run(() => post(`/rides/${rideId}/cancel`, { reason, part }));
+    const series = part === 'both' && scope === 'series';
+    const ok = await run(() => post(`/rides/${rideId}/cancel`, series ? { reason, scope: 'series' } : { reason, part }));
     if (!ok) return;
-    if (thenRebook && part === 'both') {
+    if (thenRebook && part === 'both' && !series) {
       await mutate();
       setMode('rebook');
       window.scrollTo({ top: 0 });
@@ -102,7 +106,22 @@ export function CancelRide({ rideId, backHref, doneHref, startWithRebook }: { ri
           </p>
         </div>
         <ErrorBox error={error} />
-        {r.returnNeeded ? (
+        {laterInSeries > 0 ? (
+          <RadioCards
+            legend="This is a repeat booking. Which lifts?"
+            name="scope"
+            value={scope}
+            onChange={(v) => {
+              setScope(v);
+              if (v === 'series') setPart('both');
+            }}
+            options={[
+              { value: 'this', label: `Just this one (${dayLong(r.pickupAt)})` },
+              { value: 'series', label: `This one and the ${laterInSeries} later lift${laterInSeries === 1 ? '' : 's'}` },
+            ]}
+          />
+        ) : null}
+        {r.returnNeeded && scope === 'this' ? (
           <RadioCards legend="Which part?" name="part" value={part} onChange={setPart} options={(Object.keys(CANCEL_PARTS) as CancelPart[]).map((k) => ({ value: k, label: CANCEL_PARTS[k] }))} />
         ) : null}
         <RadioCards legend="Why are you cancelling?" name="why" value={reason} onChange={setReason} error={fields.reason} options={USER_CANCEL_REASONS.map((k) => ({ value: k, label: CANCEL_REASONS[k] }))} />
@@ -110,9 +129,9 @@ export function CancelRide({ rideId, backHref, doneHref, startWithRebook }: { ri
       </main>
       <div className="m-foot">
         <button className="btn btn-danger-solid block" type="button" disabled={!reason || busy} onClick={() => cancel(false)}>
-          {part === 'return_only' ? 'Cancel the lift home' : 'Cancel lift'}
+          {part === 'return_only' ? 'Cancel the lift home' : cancelAll ? `Cancel ${laterInSeries + 1} lifts` : 'Cancel lift'}
         </button>
-        {part === 'both' ? (
+        {part === 'both' && !cancelAll ? (
           <button className="btn btn-secondary block" type="button" disabled={!reason || busy} onClick={() => cancel(true)}>
             Cancel and pick a new date
           </button>

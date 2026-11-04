@@ -96,6 +96,10 @@ Transitions are enforced by `assertTransition()` (shared) and by `status` guards
 3. Driver has said they can give each kind of help needed (door, car, lifting a wheelchair) — story 1.6.
 4. No other accepted ride within 90 minutes of the pickup or the lift home.
 5. Not excluded for this member by safeguarding.
+6. The driver hasn't booked the day out on their calendar (story 3.4, `driver_days_off`; the UK date of the pickup).
+
+Recurring bookings (story 2.6) create one ride per day, linked by `rides.series_id → ride_series`, and run these
+rules for each day separately, so different drivers can take different days.
 
 Every eligible driver is invited at once. The reasons drivers were *not* eligible are written to the
 audit log and feed the "why no driver was found" report.
@@ -107,6 +111,8 @@ erDiagram
   members ||--o{ rides : books
   drivers ||--o{ rides : drives
   rides ||--o{ ride_invites : "invites"
+  ride_series ||--o{ rides : "repeats"
+  drivers ||--o{ driver_days_off : "books out"
   drivers ||--o{ ride_invites : receives
   rides ||--o{ trip_logs : "driver + member"
   rides ||--o{ concerns : has
@@ -176,3 +182,21 @@ erDiagram
 | JWT cookie + DB lookup per request | Stateless scaling with instant revocation | very high traffic → short-lived cache |
 | SMS/email via webhook adapter | Church's provider is undecided (M365 dependency, PRD §11) | provider chosen |
 | Hand-written service worker | Full control of the privacy rule "no personal data cached on phones" | push notifications are added |
+
+## Releases and the epic switch
+
+The product ships in slices that follow the Jira epics, but there is only one codebase and one branch of
+logic. `ENABLED_EPICS` (API environment) is parsed by `packages/shared/src/release.ts` into feature flags:
+`tripDetails` (Epic 4), `tripLogging` (5), `signOff` (6) and `reports` (7). Epics 1–3 are always on.
+
+* The **API** is the enforcement point. `requireFeature()` (`apps/api/src/lib/release.ts`) guards whole
+  routers and single routes, and returns `404 not_in_release`. Views drop data that belongs to a switched-off
+  epic: for example, before Epic 4 the driver gets the `driver_confirmed` view, which has no member
+  personal data.
+* The **web app** reads `GET /api/release` (public, no personal data). It hides navigation and wraps
+  switched-off screens in `<FeatureGate>`, mostly through route-segment `layout.tsx` files, so the screens
+  themselves don't change.
+* Prerequisites are checked at start-up (5 needs 4, 6 needs 5), so a bad setting fails loudly.
+
+This keeps a demo release and the full product on the same tested code. CI runs the journey tests for the
+full release and for the Epics 1–3 release.

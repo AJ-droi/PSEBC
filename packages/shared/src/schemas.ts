@@ -12,12 +12,14 @@ import {
   MOBILITY_AIDS,
   ON_TIME,
   ROLES,
+  RULES,
   SIGNOFF_OUTCOMES,
   VEHICLE_CAPS,
   VEHICLE_REQUIREMENTS,
   YES_NO_UNSURE,
 } from './domain';
 import { isUkPhone, normaliseUkPhone } from './phone';
+import { isoDaysBetween, ukDate } from './dates';
 
 const keys = <T extends Record<string, string>>(m: T) => Object.keys(m) as [keyof T & string, ...(keyof T & string)[]];
 const enumOf = <T extends Record<string, string>>(m: T) => z.enum(keys(m));
@@ -161,34 +163,61 @@ export const driverDecisionSchema = z
 
 // ---------- F04 Request a ride (story 2.1 / 2.2) ----------
 
+/** What a lift is, apart from when: shared by a single booking and a recurring one. */
+const rideDetailsShape = {
+  memberId: z.string().uuid().optional(),
+  pickupFromHome: z.boolean().default(true),
+  pickupAddress: trimmed(200).optional().default(''),
+  destination: required('Where you are going'),
+  returnNeeded: z.boolean(),
+  companion: z.boolean().default(false),
+  needsNote: trimmed(300).optional().default(''),
+};
+
+const needsPickupAddress = (v: { pickupFromHome: boolean; pickupAddress: string }) => v.pickupFromHome || v.pickupAddress.length > 0;
+const PICKUP_ADDRESS_ISSUE = { message: 'Enter where to pick you up', path: ['pickupAddress'] };
+const returnAfterPickup = (pickupAt: string, returnAt: string | null | undefined) => !returnAt || new Date(returnAt) > new Date(pickupAt);
+
 export const rideRequestSchema = z
-  .object({
-    memberId: z.string().uuid().optional(),
-    pickupAt: isoDateTime,
-    pickupFromHome: z.boolean().default(true),
-    pickupAddress: trimmed(200).optional().default(''),
-    destination: required('Where you are going'),
-    returnNeeded: z.boolean(),
-    returnAt: isoDateTime.optional().nullable(),
-    companion: z.boolean().default(false),
-    needsNote: trimmed(300).optional().default(''),
-  })
-  .refine((v) => v.pickupFromHome || v.pickupAddress.length > 0, {
-    message: 'Enter where to pick you up',
-    path: ['pickupAddress'],
-  })
+  .object({ ...rideDetailsShape, pickupAt: isoDateTime, returnAt: isoDateTime.optional().nullable() })
+  .refine(needsPickupAddress, PICKUP_ADDRESS_ISSUE)
   .refine((v) => !v.returnNeeded || !!v.returnAt, { message: 'Choose a time for the lift home', path: ['returnAt'] })
-  .refine((v) => !v.returnAt || new Date(v.returnAt) > new Date(v.pickupAt), {
+  .refine((v) => returnAfterPickup(v.pickupAt, v.returnAt), {
     message: 'The lift home must be after the pickup',
     path: ['returnAt'],
   });
 export type RideRequestInput = z.infer<typeof rideRequestSchema>;
+
+// ---------- Recurring booking (story 2.6 / PSEBC-16) ----------
+
+/**
+ * The same lift on several days: one request per day, each matched to drivers on its own.
+ * The client sends each day's times (it knows UK local time); the API checks them.
+ */
+export const rideSeriesSchema = z
+  .object({
+    ...rideDetailsShape,
+    occurrences: z
+      .array(z.object({ pickupAt: isoDateTime, returnAt: isoDateTime.optional().nullable() }))
+      .min(2, 'Choose at least two days for a repeat booking')
+      .max(RULES.maxSeriesLifts, `You can book up to ${RULES.maxSeriesLifts} lifts at once`),
+  })
+  .refine(needsPickupAddress, PICKUP_ADDRESS_ISSUE)
+  .refine((v) => !v.returnNeeded || v.occurrences.every((o) => !!o.returnAt), { message: 'Choose a time for the lift home', path: ['occurrences'] })
+  .refine((v) => v.occurrences.every((o) => returnAfterPickup(o.pickupAt, o.returnAt)), { message: 'The lift home must be after the pickup', path: ['occurrences'] })
+  .refine((v) => new Set(v.occurrences.map((o) => ukDate(new Date(o.pickupAt)))).size === v.occurrences.length, {
+    message: 'Each day can only be chosen once',
+    path: ['occurrences'],
+  });
+export type RideSeriesInput = z.infer<typeof rideSeriesSchema>;
 
 // ---------- F05 Cancel / rebook (story 2.3 / 2.4) ----------
 
 export const rideCancelSchema = z.object({
   reason: enumOf(CANCEL_REASONS),
   part: enumOf(CANCEL_PARTS).default('both'),
+  /** Story 2.6: for a repeat booking, also cancel the later lifts in the series. */
+  scope: z.enum(['this', 'series']).default('this'),
   note: trimmed(300).optional().default(''),
 });
 
@@ -196,6 +225,24 @@ export const rideRebookSchema = z.object({
   pickupAt: isoDateTime,
   returnAt: isoDateTime.optional().nullable(),
 });
+
+// ---------- Driver calendar (story 3.4 / PSEBC-20) ----------
+
+/** Replace the driver's days off between `from` and `to` (inclusive) with `daysOff`. */
+export const driverAvailabilitySchema = z
+  .object({
+    from: isoDate,
+    to: isoDate,
+    daysOff: z.array(isoDate).max(RULES.bookingHorizonDays * 2),
+  })
+  .refine((v) => v.from <= v.to, { message: 'The end date must be after the start date', path: ['to'] })
+  .refine((v) => isoDaysBetween(v.from, v.to) <= RULES.bookingHorizonDays * 2, { message: 'Choose up to 16 weeks at a time', path: ['to'] })
+  .refine((v) => v.daysOff.every((d) => d >= v.from && d <= v.to), { message: 'Every day off must be inside the dates shown', path: ['daysOff'] });
+export type DriverAvailabilityInput = z.infer<typeof driverAvailabilitySchema>;
+
+export const dayRangeQuerySchema = z
+  .object({ from: isoDate, to: isoDate })
+  .refine((v) => v.from <= v.to && isoDaysBetween(v.from, v.to) <= RULES.bookingHorizonDays * 2, { message: 'Choose up to 16 weeks at a time', path: ['to'] });
 
 // ---------- F06 Invite response (story 3.2) ----------
 

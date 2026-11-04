@@ -1,22 +1,26 @@
 import { Router } from 'express';
 import {
+  dayRangeQuerySchema,
   declineSchema,
   driverLogSchema,
   memberLogSchema,
   rideCancelSchema,
   rideRebookSchema,
   rideRequestSchema,
+  rideSeriesSchema,
   tripProgressSchema,
 } from '@psebc/shared';
 import { z } from 'zod';
 import { ah, parse, uuidParam } from '../../lib/http';
 import { pageFrom } from '../../lib/pagination';
 import { forbidden } from '../../lib/errors';
+import { requireFeature } from '../../lib/release';
 import { currentUser, requireAuth, requireRole } from '../../middleware/auth';
 import { actorFrom } from '../../services/audit';
 import { flushSoon } from '../../services/notify';
 import * as svc from './service';
 import { memberRideHistory, memberRides, rideView } from './views';
+import { freeDriversByDay } from '../drivers/calendar';
 
 export const ridesRouter = Router();
 
@@ -29,7 +33,7 @@ ridesRouter.get(
     const memberId = user.role === 'member' ? user.memberId : String(req.query.memberId ?? '');
     if (!memberId) throw forbidden();
     svc.assertCanActForMember(user, memberId);
-    res.json(await memberRides(memberId));
+    res.json(await memberRides(memberId, user.role === 'member' ? 'member' : 'office'));
   }),
 );
 
@@ -43,8 +47,37 @@ ridesRouter.get(
     if (!memberId) throw forbidden();
     svc.assertCanActForMember(user, memberId);
     const page = pageFrom(req);
-    const { rows, total } = await memberRideHistory(memberId, page);
+    const { rows, total } = await memberRideHistory(memberId, page, user.role === 'member' ? 'member' : 'office');
     res.json({ rides: rows, pagination: page.meta(total) });
+  }),
+);
+
+/**
+ * Story 3.4 (PSEBC-20): how many drivers who suit this member are free on each day (`?memberId=&from=&to=`).
+ * Counts only — who the drivers are is shared once a driver accepts (Epic 4).
+ */
+ridesRouter.get(
+  '/availability',
+  requireRole('member', 'coordinator', 'admin'),
+  ah(async (req, res) => {
+    const user = currentUser(req);
+    const memberId = user.role === 'member' ? user.memberId : String(req.query.memberId ?? '');
+    if (!memberId) throw forbidden();
+    svc.assertCanActForMember(user, memberId);
+    const { from, to } = parse(dayRangeQuerySchema, req.query);
+    res.json({ days: await freeDriversByDay(memberId, from, to) });
+  }),
+);
+
+/** Story 2.6 (PSEBC-16): the same lift on several days. One request per day, each matched on its own. */
+ridesRouter.post(
+  '/series',
+  requireRole('member', 'coordinator', 'admin'),
+  ah(async (req, res) => {
+    const input = parse(rideSeriesSchema, req.body);
+    const result = await svc.requestSeries(currentUser(req), actorFrom(req), input);
+    flushSoon();
+    res.status(201).json(result);
   }),
 );
 
@@ -72,7 +105,10 @@ ridesRouter.post(
   requireRole('member', 'coordinator', 'admin'),
   ah(async (req, res) => {
     const input = parse(rideCancelSchema, req.body);
-    const result = await svc.cancelRide(currentUser(req), actorFrom(req), uuidParam(req), input.reason, input.part, input.note);
+    const result =
+      input.scope === 'series'
+        ? await svc.cancelSeriesFrom(currentUser(req), actorFrom(req), uuidParam(req), input.reason, input.note)
+        : await svc.cancelRide(currentUser(req), actorFrom(req), uuidParam(req), input.reason, input.part, input.note);
     flushSoon();
     res.json(result);
   }),
@@ -99,7 +135,7 @@ ridesRouter.post(
   }),
 );
 
-// ---- Driver actions -------------------------------------------------------
+// ---- Driver actions (accept/decline/withdraw = Epic 3; progress and logs = Epic 5) -------------------------------------------------------
 
 ridesRouter.post(
   '/:id/accept',
@@ -135,6 +171,7 @@ ridesRouter.post(
 
 ridesRouter.post(
   '/:id/progress',
+  requireFeature('tripLogging'),
   requireRole('driver'),
   ah(async (req, res) => {
     const { event } = parse(tripProgressSchema, req.body);
@@ -146,6 +183,7 @@ ridesRouter.post(
 
 ridesRouter.post(
   '/:id/logs/driver',
+  requireFeature('tripLogging'),
   requireRole('driver'),
   ah(async (req, res) => {
     const input = parse(driverLogSchema, req.body);
@@ -156,6 +194,7 @@ ridesRouter.post(
 
 ridesRouter.post(
   '/:id/logs/member',
+  requireFeature('tripLogging'),
   requireRole('member', 'coordinator', 'admin'),
   ah(async (req, res) => {
     const input = parse(memberLogSchema, req.body);

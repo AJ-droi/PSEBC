@@ -34,7 +34,10 @@
 Render's free plan sleeps after 15 minutes idle. The GitHub Actions cron (step 4) wakes it every 10 minutes,
 so lifts stay responsive around services. For a guaranteed always-on API, use any small paid plan later.
 
-## 3. Web app on Vercel
+## 3. Web app on Vercel (or Render)
+
+`render.yaml` also defines the web app as a second Render service (`psebc-web`), so a Render Blueprint
+deploys both. See [release-epics-1-3.md](release-epics-1-3.md). For Vercel instead:
 
 1. Import the repository → **Root directory** `apps/web` → framework Next.js.
 2. Environment variable `API_URL=https://<your-api-host>` (no trailing slash).

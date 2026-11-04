@@ -1,4 +1,4 @@
-import { and, count, eq, sql } from 'drizzle-orm';
+import { and, asc, count, eq, gte, sql } from 'drizzle-orm';
 import {
   CANCEL_REASONS,
   DECLINE_REASONS,
@@ -10,10 +10,12 @@ import {
   type CancelReason,
   type DeclineReason,
   type RideRequestInput,
+  type RideSeriesInput,
 } from '@psebc/shared';
 import { withTx, type Tx } from '../../db/client';
-import { drivers, rideInvites, rides, tripLogs, type Ride } from '../../db/schema';
+import { drivers, rideInvites, rideSeries, rides, tripLogs, type Ride } from '../../db/schema';
 import { AppError, badRequest, conflict, forbidden, notFound } from '../../lib/errors';
+import { featureOn } from '../../lib/release';
 import { addHours, formatWhen } from '../../lib/time';
 import { audit, type Actor } from '../../services/audit';
 import { notifyDriver, notifyMember, notifyRole, notifyUsers } from '../../services/notify';
@@ -48,55 +50,131 @@ const withdrawOpenInvites = (tx: Tx, rideId: string) =>
 // F04 Request a ride (story 2.1 PSEBC-12, 2.2 PSEBC-13)
 // ---------------------------------------------------------------------------
 
+const MIN_NOTICE_MS = 30 * 60_000;
+const tooSoon = (pickupAt: Date) => pickupAt.getTime() < Date.now() + MIN_NOTICE_MS;
+
+/** The member must be active and have consent recorded before any lift is booked (story 1.1). */
+async function bookableMember(tx: Tx, memberId: string) {
+  const member = await getMember(memberId, tx);
+  if (!member || member.status !== 'active') throw notFound('Member');
+  // Story 1.1: "The profile can't be used until consent to share needs with the assigned driver is recorded."
+  if (!member.consentGiven) {
+    throw new AppError(409, 'no_consent', 'Lifts can’t be booked until consent to share needs with the driver is recorded. Please call the church office.');
+  }
+  return member;
+}
+
+type BookableMember = Awaited<ReturnType<typeof bookableMember>>;
+type RideDetails = Omit<RideRequestInput, 'memberId' | 'pickupAt' | 'returnAt'>;
+
+/** Insert one ride and invite eligible drivers. Shared by single, rebooked and recurring bookings. */
+async function createAndMatch(
+  tx: Tx,
+  user: SessionUser,
+  actor: Actor,
+  member: BookableMember,
+  details: RideDetails,
+  when: { pickupAt: Date; returnAt: Date | null },
+  opts: { rebookedFrom?: string; seriesId?: string } = {},
+) {
+  const [ride] = await tx
+    .insert(rides)
+    .values({
+      memberId: member.id,
+      bookedByUserId: user.id,
+      bookedByRole: user.role,
+      pickupAt: when.pickupAt,
+      pickupFromHome: details.pickupFromHome,
+      pickupAddress: details.pickupFromHome ? `${member.addressLine}, ${member.town} ${member.postcode}` : details.pickupAddress,
+      destination: details.destination,
+      returnNeeded: details.returnNeeded,
+      returnAt: details.returnNeeded ? when.returnAt : null,
+      companion: details.companion,
+      needsNote: details.needsNote,
+      rebookedFromId: opts.rebookedFrom ?? null,
+      seriesId: opts.seriesId ?? null,
+    })
+    .returning();
+  await audit(
+    actor,
+    {
+      action: opts.rebookedFrom ? 'ride.rebook' : 'ride.request',
+      entityType: 'ride',
+      entityId: ride!.id,
+      details: { memberId: member.id, bookedByRole: user.role, rebookedFrom: opts.rebookedFrom, seriesId: opts.seriesId },
+    },
+    tx,
+  );
+  const outcome = await matchAndInvite(tx, ride!, actor);
+  return { ride: ride!, outcome };
+}
+
 export async function requestRide(user: SessionUser, actor: Actor, input: RideRequestInput, opts: { rebookedFrom?: string } = {}) {
   const memberId = user.role === 'member' ? user.memberId : input.memberId;
   if (!memberId) throw badRequest('Choose the member this lift is for');
   assertCanActForMember(user, memberId);
 
   const pickupAt = new Date(input.pickupAt);
-  if (pickupAt.getTime() < Date.now() + 30 * 60_000) throw badRequest('Choose a pickup time at least 30 minutes from now');
+  if (tooSoon(pickupAt)) throw badRequest('Choose a pickup time at least 30 minutes from now');
 
   return withTx(async (tx) => {
-    const member = await getMember(memberId, tx);
-    if (!member || member.status !== 'active') throw notFound('Member');
-    // Story 1.1: "The profile can't be used until consent to share needs with the assigned driver is recorded."
-    if (!member.consentGiven) {
-      throw new AppError(409, 'no_consent', 'Lifts can’t be booked until consent to share needs with the driver is recorded. Please call the church office.');
-    }
-    const [ride] = await tx
-      .insert(rides)
-      .values({
-        memberId,
-        bookedByUserId: user.id,
-        bookedByRole: user.role,
-        pickupAt,
-        pickupFromHome: input.pickupFromHome,
-        pickupAddress: input.pickupFromHome ? `${member.addressLine}, ${member.town} ${member.postcode}` : input.pickupAddress,
-        destination: input.destination,
-        returnNeeded: input.returnNeeded,
-        returnAt: input.returnNeeded && input.returnAt ? new Date(input.returnAt) : null,
-        companion: input.companion,
-        needsNote: input.needsNote,
-        rebookedFromId: opts.rebookedFrom ?? null,
-      })
-      .returning();
-    await audit(
-      actor,
-      { action: opts.rebookedFrom ? 'ride.rebook' : 'ride.request', entityType: 'ride', entityId: ride!.id, details: { memberId, bookedByRole: user.role, rebookedFrom: opts.rebookedFrom } },
-      tx,
-    );
-
-    const outcome = await matchAndInvite(tx, ride!, actor);
+    const member = await bookableMember(tx, memberId);
+    const { ride, outcome } = await createAndMatch(tx, user, actor, member, input, { pickupAt, returnAt: input.returnAt ? new Date(input.returnAt) : null }, opts);
 
     // Story 2.2: a member booked for by the office gets a text or phone-call confirmation.
     await notifyMember(tx, memberId, {
       kind: 'booked',
       title: 'Lift booked',
       body: `Your lift on ${formatWhen(pickupAt)} to ${input.destination} is booked. We’ll tell you when a driver says yes.`,
-      link: `/member/rides/${ride!.id}`,
-      rideId: ride!.id,
+      link: `/member/rides/${ride.id}`,
+      rideId: ride.id,
     });
-    return { id: ride!.id, status: outcome.status, invited: outcome.invited.length };
+    return { id: ride.id, status: outcome.status, invited: outcome.invited.length };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Recurring bookings (story 2.6 PSEBC-16)
+// ---------------------------------------------------------------------------
+
+/**
+ * Book the same lift on several days in one go. Each day becomes its own ride with its own invites, so a
+ * driver can say yes to one Sunday without committing to all of them. All days are booked or none are.
+ */
+export async function requestSeries(user: SessionUser, actor: Actor, input: RideSeriesInput) {
+  const memberId = user.role === 'member' ? user.memberId : input.memberId;
+  if (!memberId) throw badRequest('Choose the member these lifts are for');
+  assertCanActForMember(user, memberId);
+
+  const horizon = Date.now() + (RULES.bookingHorizonDays + 1) * 86_400_000;
+  const days = input.occurrences
+    .map((o) => ({ pickupAt: new Date(o.pickupAt), returnAt: input.returnNeeded && o.returnAt ? new Date(o.returnAt) : null }))
+    .sort((a, b) => a.pickupAt.getTime() - b.pickupAt.getTime());
+  if (days.some((d) => tooSoon(d.pickupAt))) throw badRequest('Every pickup must be at least 30 minutes from now', { fields: { occurrences: 'One of the days is too soon' } });
+  if (days.some((d) => d.pickupAt.getTime() > horizon)) {
+    throw badRequest(`Lifts can be booked up to ${RULES.bookingHorizonDays / 7} weeks ahead`, { fields: { occurrences: 'One of the days is too far ahead' } });
+  }
+
+  return withTx(async (tx) => {
+    const member = await bookableMember(tx, memberId);
+    const [series] = await tx.insert(rideSeries).values({ memberId, createdByUserId: user.id }).returning({ id: rideSeries.id });
+    const booked = [];
+    for (const when of days) {
+      const { ride, outcome } = await createAndMatch(tx, user, actor, member, input, when, { seriesId: series!.id });
+      booked.push({ id: ride.id, pickupAt: ride.pickupAt, status: outcome.status, invited: outcome.invited.length });
+    }
+    await audit(actor, { action: 'ride.series_request', entityType: 'ride_series', entityId: series!.id, details: { memberId, lifts: booked.length } }, tx);
+
+    // One confirmation for the whole booking, not one per day.
+    const list = days.map((d) => formatWhen(d.pickupAt)).join('; ');
+    await notifyMember(tx, memberId, {
+      kind: 'booked',
+      title: `${booked.length} lifts booked`,
+      body: `Your lifts to ${input.destination} are booked: ${list}. We’ll tell you when a driver says yes to each one.`,
+      link: `/member/rides/${booked[0]!.id}`,
+      rideId: booked[0]!.id,
+    });
+    return { seriesId: series!.id, id: booked[0]!.id, rides: booked };
   });
 }
 
@@ -135,7 +213,10 @@ export async function acceptInvite(user: SessionUser, actor: Actor, rideId: stri
     await notifyMember(tx, ride.memberId, {
       kind: 'driver_found',
       title: 'Your driver is booked',
-      body: `${firstName} will pick you up on ${formatWhen(ride.pickupAt)} in a ${driver.vehicleColour} ${driver.vehicleMakeModel} (${driver.vehicleReg}).`,
+      // Driver name and car are shared with the member in Epic 4 (story 4.1); until then, confirm only.
+      body: featureOn('tripDetails')
+        ? `${firstName} will pick you up on ${formatWhen(ride.pickupAt)} in a ${driver.vehicleColour} ${driver.vehicleMakeModel} (${driver.vehicleReg}).`
+        : `A volunteer driver has said yes to your lift on ${formatWhen(ride.pickupAt)}. The church office will be in touch before the day.`,
       link: `/member/rides/${rideId}`,
       rideId,
     });
@@ -200,22 +281,58 @@ export async function cancelRide(user: SessionUser, actor: Actor, rideId: string
       return { ok: true, status: ride.status };
     }
 
-    assertTransition(ride.status, 'cancelled');
-    await setStatus(tx, rideId, 'cancelled', { cancelledAt: new Date(), cancelledBy: user.id, cancelReason: reason, cancelNote: note });
-    const openInvites = await withdrawOpenInvites(tx, rideId);
-    await audit(actor, { action: 'ride.cancel', entityType: 'ride', entityId: rideId, details: { reason, byRole: user.role } }, tx);
-
-    // Story 2.3: "the driver is notified".
-    if (ride.driverId) {
-      await notifyDriver(tx, ride.driverId, { kind: 'cancelled', title: 'Lift cancelled', body: `The lift on ${formatWhen(ride.pickupAt)} has been cancelled. You don’t need to go.`, link: '/driver', rideId });
-    }
-    for (const i of openInvites) {
-      await notifyDriver(tx, i.driverId, { kind: 'cancelled', title: 'Request withdrawn', body: `The lift request for ${formatWhen(ride.pickupAt)} is no longer needed.`, link: '/driver', rideId });
-    }
+    await cancelLocked(tx, user, actor, ride, reason, note);
     if (user.role === 'member') {
       await notifyRole(tx, ['coordinator'], { kind: 'cancelled', title: 'Lift cancelled by member', body: `A lift on ${formatWhen(ride.pickupAt)} was cancelled: ${CANCEL_REASONS[reason]}.`, link: `/office/rides/${rideId}`, rideId });
     }
     return { ok: true, status: 'cancelled' as const };
+  });
+}
+
+/** Cancel a ride whose row is already locked: status, invites, audit, and tell every driver involved (story 2.3). */
+async function cancelLocked(tx: Tx, user: SessionUser, actor: Actor, ride: Ride, reason: CancelReason, note: string, details: Record<string, unknown> = {}) {
+  assertTransition(ride.status, 'cancelled');
+  await setStatus(tx, ride.id, 'cancelled', { cancelledAt: new Date(), cancelledBy: user.id, cancelReason: reason, cancelNote: note });
+  const openInvites = await withdrawOpenInvites(tx, ride.id);
+  await audit(actor, { action: 'ride.cancel', entityType: 'ride', entityId: ride.id, details: { reason, byRole: user.role, ...details } }, tx);
+
+  // Story 2.3: "the driver is notified".
+  if (ride.driverId) {
+    await notifyDriver(tx, ride.driverId, { kind: 'cancelled', title: 'Lift cancelled', body: `The lift on ${formatWhen(ride.pickupAt)} has been cancelled. You don’t need to go.`, link: '/driver', rideId: ride.id });
+  }
+  for (const i of openInvites) {
+    await notifyDriver(tx, i.driverId, { kind: 'cancelled', title: 'Request withdrawn', body: `The lift request for ${formatWhen(ride.pickupAt)} is no longer needed.`, link: '/driver', rideId: ride.id });
+  }
+}
+
+/** Story 2.6: cancel this lift and every later lift in the same repeat booking that can still be cancelled. */
+export async function cancelSeriesFrom(user: SessionUser, actor: Actor, rideId: string, reason: CancelReason, note: string) {
+  return withTx(async (tx) => {
+    const first = await lockRide(rideId, tx);
+    if (!first) throw notFound('Lift');
+    assertCanActForMember(user, first.memberId);
+    if (!first.seriesId) throw badRequest('This lift isn’t part of a repeat booking');
+    if (!isCancellable(first.status, first.pickupAt)) throw conflict('This lift can no longer be cancelled. Please call the church office.');
+
+    const later = await tx
+      .select()
+      .from(rides)
+      .where(and(eq(rides.seriesId, first.seriesId), gte(rides.pickupAt, first.pickupAt)))
+      .orderBy(asc(rides.pickupAt))
+      .for('update');
+    const toCancel = later.filter((r) => isCancellable(r.status, r.pickupAt));
+    for (const ride of toCancel) await cancelLocked(tx, user, actor, ride, reason, note, { seriesId: first.seriesId });
+
+    if (user.role === 'member') {
+      await notifyRole(tx, ['coordinator'], {
+        kind: 'cancelled',
+        title: 'Repeat lifts cancelled by member',
+        body: `${toCancel.length} lifts from ${formatWhen(first.pickupAt)} onwards were cancelled: ${CANCEL_REASONS[reason]}.`,
+        link: `/office/rides/${first.id}`,
+        rideId: first.id,
+      });
+    }
+    return { ok: true, status: 'cancelled' as const, cancelled: toCancel.length };
   });
 }
 

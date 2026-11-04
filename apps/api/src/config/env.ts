@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { parseEnabledEpics } from '@psebc/shared';
 
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -21,6 +22,19 @@ const schema = z.object({
   VAPID_PUBLIC_KEY: z.string().optional().default(''),
   VAPID_PRIVATE_KEY: z.string().optional().default(''),
   VAPID_SUBJECT: z.string().optional().default('mailto:office@example.org'),
+  // Which PRD epics are live, e.g. "1-3" for the Epics 1–3 demo, or "all". See packages/shared/src/release.ts.
+  ENABLED_EPICS: z
+    .string()
+    .optional()
+    .default('all')
+    .transform((v, ctx) => {
+      try {
+        return parseEnabledEpics(v);
+      } catch (e) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: (e as Error).message });
+        return z.NEVER;
+      }
+    }),
   REPORTS_SHOW_MEMBER_NAMES: z
     .string()
     .default('false')

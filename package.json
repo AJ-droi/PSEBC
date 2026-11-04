@@ -2,7 +2,7 @@
   "name": "psebc-transport",
   "private": true,
   "version": "1.0.0",
-  "description": "PSEBC Lifts \u2014 volunteer transport PWA for Princes Street Church",
+  "description": "PSEBC Lifts — volunteer transport PWA for Princes Street Church",
   "workspaces": [
     "packages/*",
     "apps/*"
@@ -12,6 +12,7 @@
     "dev:api": "npm run dev --workspace @psebc/api",
     "dev:web": "npm run dev --workspace @psebc/web",
     "build": "npm run build --workspace @psebc/shared && npm run build --workspace @psebc/api && npm run build --workspace @psebc/web",
+    "start": "node scripts/start-all.mjs",
     "db:migrate": "npm run db:migrate --workspace @psebc/api",
     "db:seed": "npm run db:seed --workspace @psebc/api",
     "typecheck": "npm run typecheck --workspaces --if-present",
@@ -19,5 +20,8 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.4"
   }
 }

@@ -10,7 +10,7 @@ import { Check, Phone } from '@/components/icons';
 import { fetcher, post } from '@/lib/api';
 import { useSubmit } from '@/lib/form';
 import { date, dayLong, time } from '@/lib/format';
-import type { DriverRecordView, DriverTripView, RideView } from '@/lib/types';
+import type { DriverConfirmedView, DriverRecordView, DriverTripView, RideView } from '@/lib/types';
 
 /** F06 (after acceptance) + F07 Trip progress — stories 4.2, 5.1. */
 export default function Trip() {
@@ -51,6 +51,7 @@ function Inner() {
     router.replace(`/driver/invites/${id}`);
     return <Loading />;
   }
+  if (data.view === 'driver_confirmed') return <Confirmed v={data as DriverConfirmedView} />;
   if (data.view !== 'driver_trip') return <ErrorBox error="This trip is not available." />;
   const t = data as DriverTripView;
   const r = t.ride;
@@ -181,6 +182,56 @@ function Inner() {
           </button>
         ) : null}
       </div>
+    </>
+  );
+}
+
+/** Epics 1–3 release: the lift is yours; member details come from the church office (Epic 4 adds them here). */
+function Confirmed({ v }: { v: DriverConfirmedView }) {
+  const { busy, error, run } = useSubmit();
+  const router = useRouter();
+  const r = v.ride;
+  return (
+    <>
+      <BackBar href="/driver" crumb={`${dayLong(r.pickupAt)} · Pick up ${time(r.pickupAt)}`} />
+      <main className="screen" id="main">
+        <div>
+          <span className="chip chip-driver_found">
+            <Check /> &nbsp;Lift confirmed
+          </span>
+          <h1 className="title" style={{ marginTop: 12 }}>
+            Thank you, the lift is yours
+          </h1>
+          <p className="lede">{v.message}</p>
+        </div>
+        <ErrorBox error={error} />
+        <section className="panel" aria-label="Lift">
+          <div className="small muted">Pick up area</div>
+          <strong style={{ fontSize: '1.125rem' }}>{r.pickupArea}</strong>
+          <p className="small muted">
+            {dayLong(r.pickupAt)}, {time(r.pickupAt)} · going to {r.destination}
+            {r.returnNeeded && r.returnAt ? ` · lift home ${time(r.returnAt)}` : ''}
+          </p>
+        </section>
+        <section className="stack-sm" aria-label="How to help">
+          <h2 className="h3">How to help</h2>
+          <Tags items={v.needs} />
+        </section>
+        {v.canWithdraw ? (
+          <button
+            type="button"
+            className="link-btn"
+            disabled={busy}
+            onClick={async () => {
+              if (!window.confirm('Hand this lift back? We’ll ask other drivers.')) return;
+              const ok = await run(() => post(`/rides/${r.id}/withdraw`, { note: '' }));
+              if (ok) router.replace('/driver');
+            }}
+          >
+            I can no longer do this lift
+          </button>
+        ) : null}
+      </main>
     </>
   );
 }

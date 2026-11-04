@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { and, asc, desc, eq, ilike, isNull, or, sql } from 'drizzle-orm';
-import { DRIVER_STATUSES, RULES, driverCreateSchema, driverDecisionSchema, driverUpdateSchema, closeAccountSchema, type DriverCreateInput, type DriverStatus } from '@psebc/shared';
+import { DRIVER_STATUSES, RULES, dayRangeQuerySchema, driverAvailabilitySchema, driverCreateSchema, driverDecisionSchema, driverUpdateSchema, closeAccountSchema, type DriverCreateInput, type DriverStatus } from '@psebc/shared';
 import { db, withTx } from '../../db/client';
 import { documents, driverExclusions, drivers, members, rideInvites, type Driver } from '../../db/schema';
 import { ah, parse, uuidParam } from '../../lib/http';
@@ -12,6 +12,7 @@ import { actorFrom, audit } from '../../services/audit';
 import { flushSoon, notifyDriver, notifyRole } from '../../services/notify';
 import { closeDriverAccount } from '../admin/accounts';
 import { driverHome } from '../rides/views';
+import { getDriverCalendar, setDriverCalendar } from './calendar';
 
 export const driversRouter = Router();
 
@@ -86,7 +87,42 @@ driversRouter.post(
   }),
 );
 
+/** Story 3.4 (PSEBC-20): the driver's own calendar — days off, and days they already have a lift. `?from=&to=` */
+driversRouter.get(
+  '/me/calendar',
+  requireRole('driver'),
+  ah(async (req, res) => {
+    const { from, to } = parse(dayRangeQuerySchema, req.query);
+    res.json(await getDriverCalendar(currentUser(req).driverId!, from, to));
+  }),
+);
+
+/** Story 3.4: replace the days off between `from` and `to`. Waiting invites on newly-off days are withdrawn and re-matched. */
+driversRouter.put(
+  '/me/calendar',
+  requireRole('driver'),
+  ah(async (req, res) => {
+    const input = parse(driverAvailabilitySchema, req.body);
+    const result = await setDriverCalendar(actorFrom(req), currentUser(req).driverId!, input);
+    flushSoon();
+    res.json(result);
+  }),
+);
+
 // ---- Office / safeguarding -----------------------------------------------
+
+/** Story 3.4: the office can see when a driver is off when arranging lifts by phone. */
+driversRouter.get(
+  '/:id/calendar',
+  requireRole('admin', 'safeguarding', 'coordinator'),
+  ah(async (req, res) => {
+    const id = uuidParam(req);
+    const { from, to } = parse(dayRangeQuerySchema, req.query);
+    const [d] = await db.select({ id: drivers.id }).from(drivers).where(eq(drivers.id, id));
+    if (!d) throw notFound('Driver');
+    res.json(await getDriverCalendar(id, from, to));
+  }),
+);
 
 /**
  * Driver list, one page at a time.

@@ -220,3 +220,24 @@ table.data a { font-weight: 500; }
 /* Pagination */
 .pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding-top: 4px; }
 .pager .btn:disabled { visibility: hidden; }
+
+/* ---------- Day calendar (driver days off 3.4, repeat bookings 2.6) ---------- */
+.cal { gap: 10px; }
+.cal-month { font-size: 1.0625rem; font-weight: 600; margin-top: 6px; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.cal-dow { text-align: center; font-size: 0.8125rem; font-weight: 600; color: var(--body); padding-bottom: 2px; }
+.cal-day { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; min-height: 52px; padding: 4px 2px; border: 1.5px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); cursor: pointer; }
+.cal-day:hover { border-color: var(--pine); }
+.cal-num { font-size: 1.0625rem; font-weight: 600; line-height: 1.1; }
+.cal-note { font-size: 0.75rem; line-height: 1.15; color: var(--body); min-height: 0.9rem; text-align: center; overflow-wrap: anywhere; }
+.cal-day.warn .cal-note { color: var(--amber-text); font-weight: 600; }
+.cal-day.on { background: var(--pine); border-color: var(--pine); color: var(--mint); }
+.cal-day.on .cal-note { color: var(--mint); font-weight: 600; }
+.cal-day.locked { background: var(--mist); border-style: dashed; border-color: var(--pine); cursor: not-allowed; }
+.cal-day.locked .cal-note { color: var(--pine); font-weight: 600; }
+.cal-day[aria-disabled='true']:not(.locked) { opacity: 0.45; cursor: not-allowed; }
+.cal-key { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 0.9375rem; color: var(--body); }
+.cal-key span { display: inline-flex; align-items: center; gap: 6px; }
+.cal-key i { width: 16px; height: 16px; border-radius: 4px; border: 1.5px solid var(--line); background: var(--surface); display: inline-block; }
+.cal-key i.on { background: var(--pine); border-color: var(--pine); }
+.cal-key i.locked { background: var(--mist); border: 1.5px dashed var(--pine); }
