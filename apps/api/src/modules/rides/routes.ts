@@ -1,11 +1,13 @@
 import { Router } from 'express';
 import {
+  dayRangeQuerySchema,
   declineSchema,
   driverLogSchema,
   memberLogSchema,
   rideCancelSchema,
   rideRebookSchema,
   rideRequestSchema,
+  rideSeriesSchema,
   tripProgressSchema,
 } from '@psebc/shared';
 import { z } from 'zod';
@@ -18,6 +20,7 @@ import { actorFrom } from '../../services/audit';
 import { flushSoon } from '../../services/notify';
 import * as svc from './service';
 import { memberRideHistory, memberRides, rideView } from './views';
+import { freeDriversByDay } from '../drivers/calendar';
 
 export const ridesRouter = Router();
 
@@ -49,6 +52,35 @@ ridesRouter.get(
   }),
 );
 
+/**
+ * Story 3.4 (PSEBC-20): how many drivers who suit this member are free on each day (`?memberId=&from=&to=`).
+ * Counts only — who the drivers are is shared once a driver accepts (Epic 4).
+ */
+ridesRouter.get(
+  '/availability',
+  requireRole('member', 'coordinator', 'admin'),
+  ah(async (req, res) => {
+    const user = currentUser(req);
+    const memberId = user.role === 'member' ? user.memberId : String(req.query.memberId ?? '');
+    if (!memberId) throw forbidden();
+    svc.assertCanActForMember(user, memberId);
+    const { from, to } = parse(dayRangeQuerySchema, req.query);
+    res.json({ days: await freeDriversByDay(memberId, from, to) });
+  }),
+);
+
+/** Story 2.6 (PSEBC-16): the same lift on several days. One request per day, each matched on its own. */
+ridesRouter.post(
+  '/series',
+  requireRole('member', 'coordinator', 'admin'),
+  ah(async (req, res) => {
+    const input = parse(rideSeriesSchema, req.body);
+    const result = await svc.requestSeries(currentUser(req), actorFrom(req), input);
+    flushSoon();
+    res.status(201).json(result);
+  }),
+);
+
 ridesRouter.post(
   '/',
   requireRole('member', 'coordinator', 'admin'),
@@ -73,7 +105,10 @@ ridesRouter.post(
   requireRole('member', 'coordinator', 'admin'),
   ah(async (req, res) => {
     const input = parse(rideCancelSchema, req.body);
-    const result = await svc.cancelRide(currentUser(req), actorFrom(req), uuidParam(req), input.reason, input.part, input.note);
+    const result =
+      input.scope === 'series'
+        ? await svc.cancelSeriesFrom(currentUser(req), actorFrom(req), uuidParam(req), input.reason, input.note)
+        : await svc.cancelRide(currentUser(req), actorFrom(req), uuidParam(req), input.reason, input.part, input.note);
     flushSoon();
     res.json(result);
   }),

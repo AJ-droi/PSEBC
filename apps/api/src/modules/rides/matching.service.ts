@@ -11,9 +11,10 @@ import {
   type MobilityAid,
   type VehicleCap,
   type VehicleRequirement,
+  ukDate,
 } from '@psebc/shared';
 import type { Tx } from '../../db/client';
-import { driverExclusions, drivers, members, rideInvites, rides, type Ride } from '../../db/schema';
+import { driverDaysOff, driverExclusions, drivers, members, rideInvites, rides, type Ride } from '../../db/schema';
 import { formatWhen } from '../../lib/time';
 import { audit, type Actor } from '../../services/audit';
 import { notifyDriver, notifyRole } from '../../services/notify';
@@ -28,7 +29,7 @@ export interface MatchOutcome {
 const asDate = (d: string | null) => (d ? new Date(`${d}T00:00:00Z`) : null);
 
 /**
- * Story 3.1 / 3.2 (PSEBC-17, PSEBC-18): filter drivers with the five rules and
+ * Story 3.1 / 3.2 (PSEBC-17, PSEBC-18): filter drivers with the matching rules (incl. their calendar, 3.4) and
  * invite every eligible driver at once. If no one is eligible the request goes
  * straight to the coordinator rather than waiting (PRD §8).
  *
@@ -54,6 +55,7 @@ export async function matchAndInvite(tx: Tx, ride: Ride, actor: Actor): Promise<
       ),
     );
   const exclusions = await tx.select().from(driverExclusions).where(eq(driverExclusions.memberId, member.id));
+  const offToday = await tx.select({ driverId: driverDaysOff.driverId, day: driverDaysOff.day }).from(driverDaysOff).where(eq(driverDaysOff.day, ukDate(ride.pickupAt)));
   const priorInvites = await tx.select({ driverId: rideInvites.driverId, status: rideInvites.status }).from(rideInvites).where(eq(rideInvites.rideId, ride.id));
   const alreadyAsked = new Set(priorInvites.filter((i) => i.status === 'sent' || i.status === 'declined').map((i) => i.driverId));
 
@@ -74,6 +76,7 @@ export async function matchAndInvite(tx: Tx, ride: Ride, actor: Actor): Promise<
     helpCaps: d.helpCaps as HelpCap[],
     busyTimes: busy.filter((b) => b.driverId === d.id).flatMap((b) => [b.pickupAt, b.returnAt].filter((t): t is Date => !!t)),
     excludedMemberIds: exclusions.filter((e) => e.driverId === d.id).map((e) => e.memberId),
+    daysOff: offToday.filter((o) => o.driverId === d.id).map((o) => o.day),
   }));
 
   const result = findEligibleDrivers(needs, { pickupAt: ride.pickupAt, returnAt: ride.returnNeeded ? ride.returnAt : null, companion: ride.companion }, pool);

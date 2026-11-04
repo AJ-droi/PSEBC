@@ -229,6 +229,10 @@ export const RULES = {
   overlapMinutes: 90,
   /** Church renewal period for a DBS check, used when no explicit renewal date is given. */
   dbsRenewalYears: 3,
+  /** Most lifts one recurring booking can create (story 2.6). Keeps a mistake small and the booking reviewable. */
+  maxSeriesLifts: 12,
+  /** How far ahead a lift can be booked, and a driver's calendar runs (booking date list = 8 weeks). */
+  bookingHorizonDays: 56,
 } as const;
 
 export function labelList<T extends Record<string, string>>(map: T, keys: readonly string[] | null | undefined): string[] {

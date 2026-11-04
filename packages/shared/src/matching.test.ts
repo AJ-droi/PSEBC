@@ -27,6 +27,7 @@ const base: MatchDriver = {
   helpCaps: ['door', 'car', 'wheelchair_boot'],
   busyTimes: [],
   excludedMemberIds: [],
+  daysOff: [],
 };
 
 describe('matching rules (PRD §8, PSEBC-17)', () => {
@@ -102,5 +103,25 @@ describe('display status', () => {
     expect(rideDisplayStatus('invites_sent', '2026-11-08T10:00:00Z')).toBe('incident');
     expect(rideDisplayStatus('signed_off', new Date())).toBe('signed_off');
     expect(rideDisplayStatus('driver_found', null)).toBe('driver_found');
+  });
+});
+
+describe('driver calendar — matching rule 6 (story 3.4, PSEBC-20)', () => {
+  it('skips a driver who has booked the day of the lift out', () => {
+    expect(whyIneligible(margaret, sunday, { ...base, daysOff: ['2026-11-08'] })).toBe('day_off');
+  });
+
+  it('still invites a driver who is off on a different day', () => {
+    expect(whyIneligible(margaret, sunday, { ...base, daysOff: ['2026-11-07', '2026-11-09'] })).toBeNull();
+  });
+
+  it('uses the UK date, not the UTC date (00:30 BST is still the UK day)', () => {
+    const earlyBst: MatchRide = { pickupAt: new Date('2026-07-04T23:30:00Z'), returnAt: null, companion: false }; // 00:30 on 5 July in London
+    expect(whyIneligible(margaret, earlyBst, { ...base, daysOff: ['2026-07-05'] })).toBe('day_off');
+    expect(whyIneligible(margaret, earlyBst, { ...base, daysOff: ['2026-07-04'] })).toBeNull();
+  });
+
+  it('a pending driver is reported as not approved even on a day off', () => {
+    expect(whyIneligible(margaret, sunday, { ...base, status: 'pending', daysOff: ['2026-11-08'] })).toBe('not_approved');
   });
 });

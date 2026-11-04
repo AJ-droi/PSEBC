@@ -68,6 +68,14 @@ function Inner() {
         </div>
       ) : null}
 
+      <Link className="card" href="/driver/calendar">
+        <div className="between">
+          <strong style={{ fontSize: '1.125rem' }}>Your calendar</strong>
+          <span aria-hidden="true">›</span>
+        </div>
+        <span className="muted">Mark the days you can’t drive, so you’re not asked on those days.</span>
+      </Link>
+
       <section className="stack" aria-labelledby="new">
         <h2 className="h2" id="new">
           New requests {data.invites.length ? <span className="badge">{data.invites.length}</span> : null}

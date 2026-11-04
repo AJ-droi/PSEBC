@@ -1,5 +1,5 @@
 'use client';
-import { formatUkPhone } from '@psebc/shared';
+import { RULES, addIsoDays, formatUkPhone, ukDate } from '@psebc/shared';
 import Link from 'next/link';
 import { Suspense, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
@@ -62,6 +62,7 @@ function Inner() {
           })}
         </ul>
       </section>
+      {d.status !== 'closed' ? <DriverDaysOff driverId={id} name={d.fullName.split(' ')[0]!} /> : null}
       {d.status !== 'closed' ? (
         <>
           <DriverForm
@@ -93,6 +94,26 @@ function Inner() {
         <p className="alert">This volunteer has left the scheme.</p>
       )}
     </>
+  );
+}
+
+/** Story 3.4: the driver's own calendar, read-only for the office (useful when arranging a lift by phone). */
+function DriverDaysOff({ driverId, name }: { driverId: string; name: string }) {
+  const from = ukDate(new Date());
+  const to = addIsoDays(from, RULES.bookingHorizonDays - 1);
+  const { data, error } = useSWR<{ daysOff: string[]; booked: string[] }>(`/drivers/${driverId}/calendar?from=${from}&to=${to}`, fetcher);
+  return (
+    <section className="section">
+      <h2>Days off (next 8 weeks)</h2>
+      <ErrorBox error={error} />
+      {!data && !error ? <Loading /> : null}
+      {data ? (
+        <p>
+          {data.daysOff.length ? data.daysOff.map((x) => date(x)).join(', ') : `${name} hasn’t marked any days off.`}
+          <span className="muted small"> · {name} changes these in the app. Lift requests aren’t sent on these days.</span>
+        </p>
+      ) : null}
+    </section>
   );
 }
 

@@ -46,6 +46,9 @@ Legend: ✅ met · 🟡 met with a note · ⬜ not built (not a Must)
 | | | | The driver is notified | ✅ | In-app + SMS to the driver; open invites withdrawn |
 | | | | The reason is captured | ✅ | Required reason list (F05) |
 | 2.4 | PSEBC-15 | Should | Details from the cancelled ride are copied into a new request | ✅ | `POST /rides/:id/rebook`; `rebooked_from_id` kept |
+| 2.6 | PSEBC-16 | Could | Member or coordinator requests the same lift on a chosen set of days in one go | ✅ | Booking wizard › “The same lift on more than one day” (calendar + “Same day every week”); `POST /rides/series`, up to 12 days within 8 weeks, all-or-nothing. Test “PSEBC-16 (2.6)” + E2E |
+| | | | Each day is matched on its own; one confirmation for the booking | ✅ | One ride per day linked by `ride_series`; a driver can accept one day only. Single “N lifts booked” message |
+| | | | Cancel one day, or this and every later day | ✅ | Cancel screen asks “Which lifts?”; `scope: 'series'`. Drivers told; one office notice |
 
 ## Epic 3 — Matching
 
@@ -56,7 +59,9 @@ Legend: ✅ met · 🟡 met with a note · ⬜ not built (not a Must)
 | | | | First acceptance confirms the ride; other invites are withdrawn | ✅ | Row lock + unique index; concurrent accept test returns one 200 and one 409 |
 | | | | Decline asks for a reason | ✅ | Reason list from the design; required |
 | 3.3 | PSEBC-19 | Should | If no driver accepts within a set time (default 24 h, or 2 h before pickup) the request is flagged to the coordinator | ✅ | Job `flagUnmatched`; thresholds in `settings`. Also flagged at once when nobody is eligible or all decline |
-| 3.4 | PSEBC-20 | Could | Driver can book out days on a calendar when unavailable | ⬜ | Not in release 1 (Could; not designed). Rule 4 already avoids double-booking |
+| 3.4 | PSEBC-20 | Could | Driver marks the days they are available and off on a calendar | ✅ | Driver › Your calendar (`/driver/calendar`, next 8 weeks); `driver_days_off`; `GET/PUT /drivers/me/calendar`. Test “PSEBC-20 (3.4)” + E2E |
+| | | | A driver is never invited on a day they booked out | ✅ | Matching rule 6 (`isAvailableOn`, UK date). Waiting invites on a newly-off day are withdrawn and the lift re-matched (→ coordinator if nobody is left). A day with an accepted lift can’t be booked out until it is handed back |
+| | | | Members can see driver availability | ✅ | Booking shows how many drivers who suit the member are free each day — **a count only**, because who the driver is stays private until Epic 4. Office sees each driver’s days off on the driver page |
 
 ## Epic 4 — Driver found and details shared
 
@@ -124,7 +129,7 @@ Legend: ✅ met · 🟡 met with a note · ⬜ not built (not a Must)
 ## Not in release 1 (as agreed in the PRD)
 
 Live GPS, payments/mileage, member ratings of drivers, external transport integrations (Won't);
-recurring bookings 2.5 and availability calendar 3.4 (Could).
+(Recurring bookings 2.6 and the driver calendar 3.4 were added after release 1; see above.)
 
 ## Open items for the sponsor
 

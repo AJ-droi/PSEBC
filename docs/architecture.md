@@ -96,6 +96,10 @@ Transitions are enforced by `assertTransition()` (shared) and by `status` guards
 3. Driver has said they can give each kind of help needed (door, car, lifting a wheelchair) — story 1.6.
 4. No other accepted ride within 90 minutes of the pickup or the lift home.
 5. Not excluded for this member by safeguarding.
+6. The driver hasn't booked the day out on their calendar (story 3.4, `driver_days_off`; the UK date of the pickup).
+
+Recurring bookings (story 2.6) create one ride per day, linked by `rides.series_id → ride_series`, and run these
+rules for each day separately, so different drivers can take different days.
 
 Every eligible driver is invited at once. The reasons drivers were *not* eligible are written to the
 audit log and feed the "why no driver was found" report.
@@ -107,6 +111,8 @@ erDiagram
   members ||--o{ rides : books
   drivers ||--o{ rides : drives
   rides ||--o{ ride_invites : "invites"
+  ride_series ||--o{ rides : "repeats"
+  drivers ||--o{ driver_days_off : "books out"
   drivers ||--o{ ride_invites : receives
   rides ||--o{ trip_logs : "driver + member"
   rides ||--o{ concerns : has

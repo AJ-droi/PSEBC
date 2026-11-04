@@ -1,5 +1,6 @@
 import type { HelpCap, HelpNeeded, MobilityAid, VehicleCap, VehicleRequirement, DriverStatus } from './domain';
 import { RULES } from './domain';
+import { ukDate } from './dates';
 
 /**
  * Matching rules (PRD §8, story 3.1 / PSEBC-17).
@@ -33,6 +34,8 @@ export interface MatchDriver {
   busyTimes: Date[];
   /** Member ids safeguarding has said this driver must not be matched with. */
   excludedMemberIds: string[];
+  /** UK dates (YYYY-MM-DD) the driver has marked as unavailable on their calendar (story 3.4). */
+  daysOff: string[];
 }
 
 export type IneligibleReason =
@@ -41,7 +44,8 @@ export type IneligibleReason =
   | 'vehicle_unsuitable'
   | 'cannot_give_help'
   | 'busy'
-  | 'excluded';
+  | 'excluded'
+  | 'day_off';
 
 export const INELIGIBLE_LABELS: Record<IneligibleReason, string> = {
   not_approved: 'Not approved by safeguarding',
@@ -50,6 +54,7 @@ export const INELIGIBLE_LABELS: Record<IneligibleReason, string> = {
   cannot_give_help: 'Cannot give the help needed',
   busy: 'Already driving at that time',
   excluded: 'Excluded for this member by safeguarding',
+  day_off: 'Marked as not available that day',
 };
 
 /** Rule 1 — approved and no check expired at the time of the ride. */
@@ -104,10 +109,16 @@ export function notExcluded(member: MatchMemberNeeds, d: MatchDriver): boolean {
   return !d.excludedMemberIds.includes(member.id);
 }
 
+/** Rule 6 — the driver hasn't booked the day out on their calendar (story 3.4 / PSEBC-20). The lift home is the same day. */
+export function isAvailableOn(ride: Pick<MatchRide, 'pickupAt'>, d: Pick<MatchDriver, 'daysOff'>): boolean {
+  return !d.daysOff.includes(ukDate(ride.pickupAt));
+}
+
 export function whyIneligible(member: MatchMemberNeeds, ride: MatchRide, d: MatchDriver): IneligibleReason | null {
   if (d.status !== 'approved') return 'not_approved';
   if (!isApprovedAndInDate(d, ride.pickupAt)) return 'check_expired';
   if (!notExcluded(member, d)) return 'excluded';
+  if (!isAvailableOn(ride, d)) return 'day_off';
   if (!vehicleFits(member, ride, d)) return 'vehicle_unsuitable';
   if (!canGiveHelp(member, d)) return 'cannot_give_help';
   if (!isFree(ride, d)) return 'busy';
@@ -119,7 +130,7 @@ export interface MatchResult {
   rejected: { driverId: string; reason: IneligibleReason }[];
 }
 
-/** All five rules must be true (PRD §8). */
+/** Every rule must be true: the five in PRD §8 plus the driver's own calendar (story 3.4). */
 export function findEligibleDrivers(member: MatchMemberNeeds, ride: MatchRide, drivers: MatchDriver[]): MatchResult {
   const result: MatchResult = { eligible: [], rejected: [] };
   for (const d of drivers) {

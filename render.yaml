@@ -1,8 +1,8 @@
 # Render Blueprint — API + web app, free tier, Frankfurt (EU hosting, PRD §9 data location).
 # Database: Neon (London / eu-west-2). See docs/release-epics-1-3.md for the step-by-step.
 #
-# ENABLED_EPICS decides what this deployment switches on. "1-3" = the Epics 1–3 demo
-# (onboarding, booking, matching). Change it to "1-4", … or "all" and redeploy the API to release more.
+# ENABLED_EPICS decides what this deployment switches on. "all" = every epic (1–7). Set "1-3" for the
+# Epics 1–3 demo (onboarding, booking, matching only). Epics switch on in order: 5 needs 4, 6 needs 5.
 services:
   - type: web
     name: psebc-api
@@ -18,7 +18,7 @@ services:
       - key: NODE_VERSION
         value: '22'
       - key: ENABLED_EPICS
-        value: '1-3'
+        value: 'all'
       - key: DATABASE_URL
         sync: false
       - key: JWT_SECRET

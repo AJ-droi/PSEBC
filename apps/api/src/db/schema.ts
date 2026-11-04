@@ -138,6 +138,19 @@ export const driverExclusions = pgTable(
   (t) => [primaryKey({ columns: [t.driverId, t.memberId] })],
 );
 
+/** Driver calendar (story 3.4 / PSEBC-20): UK days the driver has booked out. Matching rule 6 skips them on these days. */
+export const driverDaysOff = pgTable(
+  'driver_days_off',
+  {
+    driverId: uuid('driver_id')
+      .notNull()
+      .references(() => drivers.id, { onDelete: 'cascade' }),
+    day: day('day').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.driverId, t.day] }), index('driver_days_off_day_idx').on(t.day)],
+);
+
 // ---------- Users / logins (PRD §10: individual logins) ----------
 export const users = pgTable(
   'users',
@@ -186,6 +199,21 @@ export const documents = pgTable(
   (t) => [check('documents_kind', sql`${t.kind} IN ('photo', 'licence', 'insurance')`)],
 );
 
+// ---------- Recurring bookings (story 2.6 / PSEBC-16) ----------
+/** One booking that made the same lift on several days. Each day is its own ride, matched on its own. */
+export const rideSeries = pgTable(
+  'ride_series',
+  {
+    id: id(),
+    memberId: uuid('member_id')
+      .notNull()
+      .references(() => members.id),
+    createdByUserId: uuid('created_by_user_id').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [index('ride_series_member_idx').on(t.memberId)],
+);
+
 // ---------- Rides (F04–F07) ----------
 export const rides = pgTable(
   'rides',
@@ -221,6 +249,8 @@ export const rides = pgTable(
     cancelNote: text('cancel_note'),
     returnCancelled: boolean('return_cancelled').notNull().default(false),
     rebookedFromId: uuid('rebooked_from_id').references((): AnyPgColumn => rides.id),
+    /** Set when the ride was booked as part of a repeat booking (story 2.6). */
+    seriesId: uuid('series_id').references(() => rideSeries.id),
     signedOffAt: tstz('signed_off_at'),
     signedOffBy: uuid('signed_off_by').references(() => users.id),
     signedOffByName: text('signed_off_by_name'),
@@ -237,6 +267,7 @@ export const rides = pgTable(
     index('rides_member_idx').on(t.memberId, t.pickupAt.desc()),
     index('rides_driver_idx').on(t.driverId, t.pickupAt.desc()),
     index('rides_pickup_idx').on(t.pickupAt),
+    index('rides_series_idx').on(t.seriesId, t.pickupAt).where(sql`${t.seriesId} IS NOT NULL`),
     check('return_after_pickup', sql`${t.returnAt} IS NULL OR ${t.returnAt} > ${t.pickupAt}`),
   ],
 );
@@ -396,6 +427,8 @@ export type Member = typeof members.$inferSelect;
 export type Driver = typeof drivers.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Ride = typeof rides.$inferSelect;
+export type RideSeries = typeof rideSeries.$inferSelect;
+export type DriverDayOff = typeof driverDaysOff.$inferSelect;
 export type RideInvite = typeof rideInvites.$inferSelect;
 export type TripLog = typeof tripLogs.$inferSelect;
 export type Concern = typeof concerns.$inferSelect;

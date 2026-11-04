@@ -7,6 +7,7 @@ import useSWR from 'swr';
 import { CANCEL_REASONS, DECLINE_REASONS, ON_TIME, type CancelReason, type DeclineReason, type OnTime } from '@psebc/shared';
 import { DesktopShell } from '@/components/shells';
 import { ErrorBox, KV, Loading, RideChip, Tags } from '@/components/ui';
+import { SeriesPanel } from '@/components/series';
 import { fetcher, post } from '@/lib/api';
 import { time, when } from '@/lib/format';
 import { useRelease } from '@/lib/release';
@@ -81,6 +82,7 @@ function Inner() {
               <Tags items={data.driverKnows} />
             </div>
           </section>
+          <SeriesPanel series={data.series} currentId={r.id} hrefFor={(x) => `/office/rides/${x}`} />
           <section className="section">
             <h2>Drivers asked</h2>
             {data.invites?.length ? (

@@ -6,6 +6,7 @@ import useSWR from 'swr';
 import { CANCEL_REASONS, type CancelReason, formatUkPhone, telHref } from '@psebc/shared';
 import { RoleGate } from '@/components/shells';
 import { BackBar, ErrorBox, Loading, RideChip, Tags } from '@/components/ui';
+import { SeriesPanel } from '@/components/series';
 import { Check, Phone } from '@/components/icons';
 import { fetcher } from '@/lib/api';
 import { dayLong, time, when } from '@/lib/format';
@@ -84,6 +85,7 @@ function RideStatus() {
               Tell us how the trip went
             </Link>
           ) : null}
+          <SeriesPanel series={data.series} currentId={r.id} hrefFor={(x) => `/member/rides/${x}`} />
           {callOffice}
           {data.canCancel ? (
             <Link className="btn btn-danger block" href={`/member/rides/${r.id}/cancel`}>
@@ -121,6 +123,7 @@ function RideStatus() {
             <div className="h3">Your driver will know</div>
             <Tags items={data.driverKnows} />
           </div>
+          <SeriesPanel series={data.series} currentId={r.id} hrefFor={(x) => `/member/rides/${x}`} />
           {callOffice}
           {data.canCancel ? (
             <Link className="btn btn-danger block" href={`/member/rides/${r.id}/cancel`}>
@@ -148,6 +151,7 @@ function RideStatus() {
               Book again for a new date
             </Link>
           ) : null}
+          <SeriesPanel series={data.series} currentId={r.id} hrefFor={(x) => `/member/rides/${x}`} />
           {callOffice}
         </main>
       </>
@@ -205,6 +209,7 @@ function RideStatus() {
           </li>
         </ol>
         <p className="muted">{unmatched ? 'The church office has been told and will call you.' : 'If no driver says yes in time, the church office will call you.'}</p>
+        <SeriesPanel series={data.series} currentId={r.id} hrefFor={(x) => `/member/rides/${x}`} />
         <Link className="btn btn-secondary block" href="/member">
           Back to my lifts
         </Link>

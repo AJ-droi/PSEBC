@@ -20,7 +20,19 @@ export interface RideCore {
   returnAt: string | null;
   returnCancelled: boolean;
   companion: boolean;
+  /** Set when the lift is part of a repeat booking (story 2.6). */
+  seriesId: string | null;
   createdAt: string;
+}
+
+/** Story 2.6: where a lift sits in its repeat booking. */
+export interface SeriesInfo {
+  id: string;
+  position: number;
+  total: number;
+  dates: { id: string; pickupAt: string; status: RideStatus }[];
+  /** This lift and the later ones that can still be cancelled together. */
+  cancellableFromHere: number;
 }
 
 export interface MemberRideView {
@@ -36,6 +48,7 @@ export interface MemberRideView {
     unmatchedFlaggedAt: string | null;
     signedOffAt: string | null;
   };
+  series: SeriesInfo | null;
   member: { id: string; fullName: string; preferredName: string; phone?: string };
   driver: DriverCard | null;
   driverKnows: string[];

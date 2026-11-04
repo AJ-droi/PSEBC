@@ -54,6 +54,7 @@ function Home({ name }: { name: string }) {
               </div>
               <span className="muted">
                 Pick up {time(r.pickupAt)} · {r.destination.replace('Princes Street Church: ', '')}
+                {r.seriesId ? ' · Repeat booking' : ''}
               </span>
               {r.driverFirstName ? <span style={{ fontWeight: 600, color: 'var(--pine)' }}>{r.driverFirstName} is collecting you</span> : null}
             </Link>

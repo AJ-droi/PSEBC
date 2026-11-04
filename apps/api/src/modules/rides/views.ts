@@ -50,7 +50,30 @@ function rideCore(r: Ride) {
     returnAt: r.returnNeeded ? r.returnAt : null,
     returnCancelled: r.returnCancelled,
     companion: r.companion,
+    seriesId: r.seriesId,
     createdAt: r.createdAt,
+  };
+}
+
+/**
+ * Story 2.6: where a ride sits in its repeat booking ("2 of 6"), and how many lifts from this one
+ * onwards could still be cancelled together.
+ */
+async function seriesInfo(r: Ride) {
+  if (!r.seriesId) return null;
+  const all = await db
+    .select({ id: rides.id, pickupAt: rides.pickupAt, status: rides.status })
+    .from(rides)
+    .where(eq(rides.seriesId, r.seriesId))
+    .orderBy(asc(rides.pickupAt));
+  const position = all.findIndex((x) => x.id === r.id) + 1;
+  const fromHere = all.slice(position - 1).filter((x) => isCancellable(x.status, x.pickupAt));
+  return {
+    id: r.seriesId,
+    position,
+    total: all.length,
+    dates: all.map((x) => ({ id: x.id, pickupAt: x.pickupAt, status: x.status })),
+    cancellableFromHere: fromHere.length,
   };
 }
 
@@ -103,6 +126,7 @@ export async function rideView(user: SessionUser, actor: Actor, rideId: string) 
         unmatchedFlaggedAt: ride.unmatchedFlaggedAt,
         signedOffAt: ride.signedOffAt,
       },
+      series: await seriesInfo(ride),
       member: { id: member.id, fullName: member.fullName, preferredName: member.preferredName, phone: isOwnMember ? undefined : member.phone },
       driver: (isOwnMember ? memberSeesDriver(ride.status) : DRIVER_VISIBLE_TO_MEMBER.includes(ride.status)) ? await driverCard(ride.driverId) : null,
       driverKnows: needsSummary(member, ride),

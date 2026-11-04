@@ -2,7 +2,7 @@ import { and, eq, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from 'drizz
 import { RULES } from '@psebc/shared';
 import { db, withTx } from '../db/client';
 import { tripLogExists } from '../db/sql';
-import { documents, drivers, members, rideInvites, rides, settings, users } from '../db/schema';
+import { documents, driverDaysOff, drivers, members, rideInvites, rides, settings, users } from '../db/schema';
 import { formatWhen } from '../lib/time';
 import { logger } from '../lib/logger';
 import { featureOn } from '../lib/release';
@@ -184,6 +184,12 @@ export async function applyRetention(now = new Date()): Promise<number> {
     .where(due(drivers))
     .returning({ id: drivers.id });
   if (anonDrivers.length) {
+    await db.delete(driverDaysOff).where(
+      inArray(
+        driverDaysOff.driverId,
+        anonDrivers.map((d) => d.id),
+      ),
+    );
     await db.delete(documents).where(
       inArray(
         documents.driverId,
