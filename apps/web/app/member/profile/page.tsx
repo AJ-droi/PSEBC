@@ -34,6 +34,7 @@ function Inner({ id }: { id: string }) {
               ['Called', m.preferredName],
               ['Address', `${m.addressLine}, ${m.town} ${m.postcode}`],
               ['Phone', formatUkPhone(m.phone)],
+              ['Email', m.email || 'None'],
               ['We contact you by', CONTACT_METHODS[m.contactMethod as keyof typeof CONTACT_METHODS] ?? m.contactMethod],
               ['Emergency contact', `${m.emergencyName} (${m.emergencyRelationship}) ${formatUkPhone(m.emergencyPhone)}`],
             ]}

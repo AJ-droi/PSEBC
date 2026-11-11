@@ -52,6 +52,8 @@ export const members = pgTable(
     postcode: text('postcode').notNull(),
     findingNotes: text('finding_notes').notNull().default(''),
     phone: text('phone').notNull(),
+    /** Optional. Lift notifications are emailed here as well as to any app login. */
+    email: text('email').notNull().default(''),
     canReceiveSms: boolean('can_receive_sms').notNull().default(true),
     contactMethod: text('contact_method').notNull().default('text'),
     bookedBy: text('booked_by').notNull().default('self'),
@@ -62,6 +64,7 @@ export const members = pgTable(
     representativeName: text('representative_name').notNull().default(''),
     representativePhone: text('representative_phone').notNull().default(''),
     representativeRole: text('representative_role').notNull().default(''),
+    representativeEmail: text('representative_email').notNull().default(''),
     mobilityAids: text('mobility_aids').array().notNull().default(sql`'{}'`),
     helpNeeded: text('help_needed').array().notNull().default(sql`'{}'`),
     vehicleRequirement: text('vehicle_requirement').notNull().default('any'),

@@ -44,7 +44,7 @@ export async function flagUnmatched(now = new Date()): Promise<number> {
         tx,
         ['coordinator', 'admin'],
         { kind: 'unmatched', title: 'No driver has accepted yet', body: `Nobody has accepted the lift on ${formatWhen(ride.pickupAt)}. Please call the member or re-send invites.`, link: `/office/rides/${ride.id}`, rideId: ride.id },
-        { email: true, sms: true },
+        { sms: true },
       );
       await audit(SYSTEM_ACTOR, { action: 'ride.flag_unmatched', entityType: 'ride', entityId: ride.id }, tx);
     });
@@ -104,7 +104,7 @@ export async function checkDriverExpiry(now = new Date()): Promise<{ reminded: n
         .set({ status: 'withdrawn', respondedAt: sql`now()` })
         .where(and(eq(rideInvites.driverId, d.id), eq(rideInvites.status, 'sent')));
       await audit(SYSTEM_ACTOR, { action: 'driver.expire', entityType: 'driver', entityId: d.id }, tx);
-      await notifyRole(tx, ['safeguarding', 'admin'], { kind: 'driver_expired', title: 'Driver checks expired', body: `${d.fullName}’s checks have expired. They won’t get lift requests until renewed and re-approved.`, link: `/safeguarding/approvals/${d.id}` }, { email: true });
+      await notifyRole(tx, ['safeguarding', 'admin'], { kind: 'driver_expired', title: 'Driver checks expired', body: `${d.fullName}’s checks have expired. They won’t get lift requests until renewed and re-approved.`, link: `/safeguarding/approvals/${d.id}` });
       await notifyDriver(tx, d.id, { kind: 'driver_expired', title: 'Your checks have expired', body: 'You won’t get lift requests until your DBS or insurance is renewed. Please contact the church office.', link: '/driver' });
     });
   }
@@ -127,7 +127,7 @@ export async function checkDriverExpiry(now = new Date()): Promise<{ reminded: n
   for (const d of expiring) {
     await withTx(async (tx) => {
       await tx.update(drivers).set({ expiryRemindedFor: d.firstExpiry }).where(eq(drivers.id, d.id));
-      await notifyRole(tx, ['safeguarding'], { kind: 'driver_expiring', title: 'Driver check expiring soon', body: `${d.fullName}’s ${d.which} expires on ${d.firstExpiry}.`, link: `/safeguarding/approvals/${d.id}` }, { email: true });
+      await notifyRole(tx, ['safeguarding'], { kind: 'driver_expiring', title: 'Driver check expiring soon', body: `${d.fullName}’s ${d.which} expires on ${d.firstExpiry}.`, link: `/safeguarding/approvals/${d.id}` });
       await notifyDriver(tx, d.id, { kind: 'driver_expiring', title: 'Your check is expiring soon', body: `Your ${d.which} expires on ${d.firstExpiry}. Please give the church office your renewed details.`, link: '/driver' });
       await audit(SYSTEM_ACTOR, { action: 'driver.expiry_reminder', entityType: 'driver', entityId: d.id, details: { expires: d.firstExpiry } }, tx);
     });

@@ -118,7 +118,6 @@ export async function matchAndInvite(tx: Tx, ride: Ride, actor: Actor): Promise<
       tx,
       ['coordinator', 'admin'],
       { kind: 'unmatched', title: 'No driver for a lift', body: `No eligible driver for ${formatWhen(ride.pickupAt)}. ${why || 'No approved drivers yet.'}`, link: `/office/rides/${ride.id}`, rideId: ride.id },
-      { email: true },
     );
   }
 

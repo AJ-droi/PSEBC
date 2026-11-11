@@ -186,7 +186,7 @@ driversRouter.post(
         .returning({ id: drivers.id });
       await audit(actorFrom(req), { action: 'driver.create', entityType: 'driver', entityId: d!.id, details: { status } }, tx);
       if (status === 'pending') {
-        await notifyRole(tx, ['safeguarding'], { kind: 'driver_pending', title: 'Driver waiting for approval', body: `${input.fullName} has been added and is waiting for your decision.`, link: `/safeguarding/approvals/${d!.id}` }, { email: true });
+        await notifyRole(tx, ['safeguarding'], { kind: 'driver_pending', title: 'Driver waiting for approval', body: `${input.fullName} has been added and is waiting for your decision.`, link: `/safeguarding/approvals/${d!.id}` });
       }
       return d!.id;
     });
@@ -248,7 +248,7 @@ driversRouter.patch(
         .where(eq(drivers.id, id));
       await audit(actorFrom(req), { action: 'driver.update', entityType: 'driver', entityId: id, details: { fields: changed, status } }, tx);
       if (status === 'pending' && before.status !== 'pending') {
-        await notifyRole(tx, ['safeguarding'], { kind: 'driver_pending', title: 'Driver waiting for approval', body: `${before.fullName}’s details changed and need your approval.`, link: `/safeguarding/approvals/${id}` }, { email: true });
+        await notifyRole(tx, ['safeguarding'], { kind: 'driver_pending', title: 'Driver waiting for approval', body: `${before.fullName}’s details changed and need your approval.`, link: `/safeguarding/approvals/${id}` });
       }
     });
     flushSoon();

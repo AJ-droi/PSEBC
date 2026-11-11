@@ -52,11 +52,31 @@ reminders, data retention and the notification outbox.
 
 ## 5. Text messages and email
 
-By default messages are written to the app and logged (`NOTIFY_*_DRIVER=console`). To send real texts
-and emails without paying for extra software, set both drivers to `webhook` and `NOTIFY_WEBHOOK_URL` to a
-flow that accepts JSON `{ channel, to, subject, body }` — for example a **Power Automate** flow on the
-church's Microsoft 365 (dependency in PRD §11) or GOV.UK Notify / Twilio. Only the webhook adapter in
-`apps/api/src/services/notify.ts` needs changing if a provider needs a different format.
+**Every notification and alert is also emailed to everyone it concerns** — the logins it is sent to,
+invited/booked drivers, the member (their login, or the email on their profile if they have no login),
+their representative when an email is on file, and the office staff given a "please call" task. Each
+person gets one email per message, with a button that opens the right page in the app.
+
+By default messages are written to the app and logged (`NOTIFY_*_DRIVER=console`). To send real email:
+
+* **Resend (recommended)** — in Resend, verify the church's sending domain (add the DNS records it shows)
+  and create an API key with sending access. Then set `NOTIFY_EMAIL_DRIVER=resend`, `RESEND_API_KEY` and
+  `EMAIL_FROM` (e.g. `PSEBC Lifts <lifts@your-church.org>`, on the verified domain), and optionally
+  `EMAIL_REPLY_TO` so replies reach the church office. Emails go over HTTPS, so blocked SMTP ports don't
+  matter. Each email carries an idempotency key (`psebc-notification/<id>`), so a retry after a timeout never
+  sends it twice. Rate limits and outages are retried (up to 5 times); a rejected email — bad address, wrong
+  key, unverified domain — is not retried, and Resend's reason is kept in `notifications.last_error`.
+  The API refuses to start without a key, or with the placeholder `@example.org` sender.
+* **SMTP** — set `NOTIFY_EMAIL_DRIVER=smtp` and `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`,
+  `SMTP_PASS`, `EMAIL_FROM` (and optionally `EMAIL_REPLY_TO`). Works with the church's Microsoft 365
+  (`smtp.office365.com:587`, dependency in PRD §11), Google Workspace, or a provider such as Brevo, Resend
+  or SendGrid. Use `SMTP_SECURE=true` for port 465. The API refuses to start if `smtp` is chosen without a host.
+* **Webhook** — set the driver to `webhook` and `NOTIFY_WEBHOOK_URL` to a flow that accepts JSON
+  `{ channel, to, subject, body, html }` — for example a **Power Automate** flow, GOV.UK Notify or Twilio.
+
+Texts use `NOTIFY_SMS_DRIVER=webhook` the same way. Adapters live in `apps/api/src/services/senders.ts`
+and the email layout in `apps/api/src/services/email-template.ts`. Failed sends are retried up to 5 times
+(see `notifications.last_error`).
 
 ## 6. Message alerts with sound
 

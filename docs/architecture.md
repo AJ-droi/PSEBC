@@ -22,7 +22,7 @@ flowchart LR
   PWA -- "same-origin /api/* (rewrite)" --> WEB[Next.js server\nVercel]
   WEB -- proxy --> API[Express API\nRender / any Node host]
   API -- "TLS, pooled" --> DB[(Neon Postgres\nLondon region)]
-  API -- outbox --> NOTIFY[Email/SMS webhook\nPower Automate, Zapier, Twilio…]
+  API -- outbox --> NOTIFY[Email via SMTP or webhook / SMS webhook\nM365, Power Automate, Twilio…]
   CRON[GitHub Actions cron\nevery 10 min] -- "POST /api/jobs/run" --> API
 ```
 
@@ -44,7 +44,9 @@ apps/api/src
   db/migrate.ts, seed.ts drizzle-kit migrations runner (../drizzle/*.sql) and demo data
   middleware/auth.ts     session cookie, per-request user load, requireRole / MFA gate
   services/audit.ts      append-only audit writer
-  services/notify.ts     notification outbox + delivery adapters (console | webhook)
+  services/notify.ts     notification outbox: every message → in-app + email (+ SMS/push/call task)
+  services/senders.ts    delivery adapters (resend | smtp | webhook | console | none)
+  services/email-template.ts  plain-text + HTML email with a link back into the app
   modules/
     auth/                login, logout, me, TOTP setup/verify
     members/             F01 registration, F12 needs + consent, F13 close

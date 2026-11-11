@@ -51,7 +51,7 @@ concernsRouter.post(
           link: `/safeguarding/trips/${rideId}`,
           rideId,
         },
-        { email: true, sms: true },
+        { sms: true },
       );
       return row!.id;
     });

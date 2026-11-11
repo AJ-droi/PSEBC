@@ -117,6 +117,7 @@ export interface MemberProfile {
   postcode: string;
   findingNotes: string;
   phone: string;
+  email: string;
   canReceiveSms: boolean;
   contactMethod: string;
   bookedBy: string;
@@ -127,6 +128,7 @@ export interface MemberProfile {
   representativeName: string;
   representativePhone: string;
   representativeRole: string;
+  representativeEmail: string;
   mobilityAids: string[];
   helpNeeded: string[];
   vehicleRequirement: string;

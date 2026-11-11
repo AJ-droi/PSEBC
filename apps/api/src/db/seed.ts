@@ -29,7 +29,7 @@ export async function seed(log: (m: string) => void = console.log) {
   const inDays = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
 
   await withTx(async (tx) => {
-    const member = async (p: { name: string; preferred: string; addr: string; town: string; pc: string; phone: string; aids: string[]; help: string[]; vehicle: string; health: string[]; unwell: string; contact: string; bookedBy: string }) => {
+    const member = async (p: { name: string; preferred: string; addr: string; town: string; pc: string; phone: string; aids: string[]; help: string[]; vehicle: string; health: string[]; unwell: string; contact: string; bookedBy: string; email?: string }) => {
       const [row] = await tx
         .insert(members)
         .values({
@@ -40,6 +40,7 @@ export async function seed(log: (m: string) => void = console.log) {
           postcode: p.pc,
           findingNotes: 'Use the side door. Ring twice.',
           phone: uk(p.phone),
+          email: p.email ?? '',
           contactMethod: p.contact,
           bookedBy: p.bookedBy,
           emergencyName: 'Ruth Evans',
@@ -49,6 +50,7 @@ export async function seed(log: (m: string) => void = console.log) {
           representativeName: 'Ruth Evans',
           representativePhone: uk('07700 900123'),
           representativeRole: 'Helps me with my arrangements',
+          representativeEmail: 'ruth@example.org',
           mobilityAids: p.aids,
           helpNeeded: p.help,
           vehicleRequirement: p.vehicle,
@@ -63,7 +65,7 @@ export async function seed(log: (m: string) => void = console.log) {
 
     const margaret = await member({ name: 'Margaret Evans', preferred: 'Margaret', addr: '12 Example Road', town: 'Barry', pc: 'CF62 0XX', phone: '07700 900456', aids: ['walking_frame'], help: ['door', 'car'], vehicle: 'easy_access', health: ['diabetes'], unwell: 'Sit me down and call my daughter Ruth on 07700 900123.', contact: 'text', bookedBy: 'self' });
     await member({ name: 'Albert Price', preferred: 'Albert', addr: '4 Harbour View', town: 'Penarth', pc: 'CF64 1AA', phone: '07700 900222', aids: ['folding_wheelchair'], help: ['door', 'car'], vehicle: 'folding_wheelchair', health: [], unwell: '', contact: 'family', bookedBy: 'family' });
-    await member({ name: 'Edna Hughes', preferred: 'Edna', addr: '9 Chapel Lane', town: 'Barry', pc: 'CF63 2BB', phone: '01446 700333', aids: ['walking_stick'], help: ['door'], vehicle: 'any', health: ['hearing_sight'], unwell: 'Call the church office.', contact: 'office', bookedBy: 'office' });
+    await member({ name: 'Edna Hughes', preferred: 'Edna', addr: '9 Chapel Lane', town: 'Barry', pc: 'CF63 2BB', phone: '01446 700333', aids: ['walking_stick'], help: ['door'], vehicle: 'any', health: ['hearing_sight'], unwell: 'Call the church office.', contact: 'office', bookedBy: 'office', email: 'edna@example.org' });
 
     const driver = async (p: { name: string; email: string; phone: string; pc: string; car: string; colour: string; reg: string; seats: number; caps: string[]; help: string[]; status: 'approved' | 'pending' }) => {
       const approved = p.status === 'approved';

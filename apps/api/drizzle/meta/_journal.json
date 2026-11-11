@@ -36,6 +36,13 @@
       "when": 1793801900414,
       "tag": "0004_recurring_bookings_and_driver_calendar",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794312468037,
+      "tag": "0005_member_emails",
+      "breakpoints": true
     }
   ]
 }

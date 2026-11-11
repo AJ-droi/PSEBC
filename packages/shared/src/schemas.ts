@@ -71,6 +71,15 @@ export const createUserSchema = z.object({
 
 // ---------- F01 Member registration (story 1.1) ----------
 
+/** Optional email: blank, or a valid address (stored lower-case). */
+const optionalEmail = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .refine((v) => v === '' || z.string().email().safeParse(v).success, 'Enter an email address, or leave this blank')
+  .optional()
+  .default('');
+
 export const memberAboutSchema = z.object({
   fullName: required('Full name'),
   preferredName: required('Preferred name', 80),
@@ -79,6 +88,7 @@ export const memberAboutSchema = z.object({
   postcode: ukPostcode,
   findingNotes: trimmed(300).optional().default(''),
   phone,
+  email: optionalEmail,
 });
 
 export const memberContactSchema = z.object({
@@ -96,6 +106,7 @@ export const memberEmergencySchema = z.object({
   representativeName: trimmed().optional().default(''),
   representativePhone: optionalPhone.optional().default(''),
   representativeRole: trimmed(80).optional().default(''),
+  representativeEmail: optionalEmail,
 });
 
 export const memberNeedsSchema = z.object({

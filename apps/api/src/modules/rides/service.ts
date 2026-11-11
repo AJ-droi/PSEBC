@@ -250,7 +250,6 @@ export async function declineInvite(user: SessionUser, actor: Actor, rideId: str
         tx,
         ['coordinator', 'admin'],
         { kind: 'unmatched', title: 'No driver for a lift', body: `Every invited driver declined the lift on ${formatWhen(ride.pickupAt)}. Latest reason: ${DECLINE_REASONS[reason]}.`, link: `/office/rides/${rideId}`, rideId },
-        { email: true },
       );
     }
     return { ok: true };
@@ -427,7 +426,7 @@ export async function recordProgress(user: SessionUser, actor: Actor, rideId: st
           link: `/office/rides/${rideId}`,
           rideId,
         },
-        { sms: true, email: true },
+        { sms: true },
       );
     }
     await audit(actor, { action: `trip.${event}`, entityType: 'ride', entityId: rideId, details: { at: now.toISOString() } }, tx);
@@ -503,7 +502,7 @@ export async function submitMemberLog(
         tx,
         ['safeguarding'],
         { kind: 'felt_unsafe', title: 'A member did not feel safe', body: `A member said they did not feel safe on the lift on ${formatWhen(ride.pickupAt)}. A concern report may follow.`, link: `/safeguarding/trips/${rideId}`, rideId },
-        { email: true, sms: true },
+        { sms: true },
       );
     }
     await maybeMarkLogged(tx, ride, actor);

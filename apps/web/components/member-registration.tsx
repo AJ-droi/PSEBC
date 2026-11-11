@@ -52,6 +52,7 @@ const initial = {
   postcode: '',
   findingNotes: '',
   phone: '',
+  email: '',
   canReceiveSms: true,
   contactMethod: 'text' as ContactMethod,
   bookedBy: 'office' as BookedBy,
@@ -62,15 +63,16 @@ const initial = {
   representativeSameAsEmergency: true,
   representativeName: '',
   representativePhone: '',
+  representativeEmail: '',
   representativeRole: REPRESENTATIVE_ROLES[0] as string,
   ...emptyNeeds,
 };
 type State = typeof initial;
 
 const STEP_OF: Record<string, number> = {
-  fullName: 1, preferredName: 1, addressLine: 1, town: 1, postcode: 1, findingNotes: 1, phone: 1,
+  fullName: 1, preferredName: 1, addressLine: 1, town: 1, postcode: 1, findingNotes: 1, phone: 1, email: 1,
   canReceiveSms: 2, contactMethod: 2, bookedBy: 2,
-  emergencyName: 3, emergencyRelationship: 3, emergencyPhone: 3, hasRepresentative: 3, representativeName: 3, representativePhone: 3, representativeRole: 3,
+  emergencyName: 3, emergencyRelationship: 3, emergencyPhone: 3, hasRepresentative: 3, representativeName: 3, representativePhone: 3, representativeEmail: 3, representativeRole: 3,
   mobilityAids: 4, helpNeeded: 4, vehicleRequirement: 4, notesForDriver: 4,
 };
 
@@ -130,6 +132,7 @@ export function MemberRegistration() {
             </div>
             <TextArea label="Anything that helps the driver find them?" hint="Optional. Please don’t write key safe codes here." value={s.findingNotes} onChange={(e) => set('findingNotes', e.target.value)} rows={2} />
             <TextField label="Phone number" type="tel" hint="UK number, for example 07700 900123" inputMode="tel" autoComplete="tel" placeholder="07700 900123" value={s.phone} onChange={(e) => set('phone', e.target.value)} error={fields.phone} />
+            <TextField label="Email address (optional)" type="email" hint="We’ll email them about their lifts as well as using the way they choose next." inputMode="email" autoComplete="email" value={s.email} onChange={(e) => set('email', e.target.value)} error={fields.email} />
           </>
         ) : null}
         {showStep === 2 ? (
@@ -158,6 +161,7 @@ export function MemberRegistration() {
                     <TextField label="Their phone" type="tel" hint="UK number, for example 07700 900123" inputMode="tel" autoComplete="tel" placeholder="07700 900123" value={s.representativePhone} onChange={(e) => set('representativePhone', e.target.value)} error={fields.representativePhone} />
                   </>
                 ) : null}
+                <TextField label="Their email (optional)" type="email" hint="They’ll be emailed about every lift." inputMode="email" autoComplete="off" value={s.representativeEmail} onChange={(e) => set('representativeEmail', e.target.value)} error={fields.representativeEmail} />
                 <SelectField label="What is their role?" value={s.representativeRole} onChange={(e) => set('representativeRole', e.target.value)} options={REPRESENTATIVE_ROLES.map((r) => ({ value: r, label: r }))} />
                 <p className="small muted">They’ll be able to book and cancel lifts for them through the church office.</p>
               </div>
